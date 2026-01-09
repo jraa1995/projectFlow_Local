@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ProjectFlow</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- Frappe Gantt Library -->
+  <script src="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/frappe-gantt@0.6.1/dist/frappe-gantt.css">
+  
+  <!-- Chart.js Library for Analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: { 50: '#fffbeb', 100: '#fef3c7', 200: '#fde68a', 300: '#fcd34d', 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706', 700: '#b45309', 800: '#92400e', 900: '#78350f' }
+          }
+        }
+      }
+    }
+  </script>
+  <?!= include('ui/Styles'); ?>
+</head>
+<body class="bg-gray-100 h-screen overflow-hidden">
+  <div id="app" class="flex h-full">
+    
+    <!-- Sidebar -->
+    <aside id="sidebar" class="w-60 bg-gray-900 text-white flex flex-col">
+      <!-- Logo -->
+      <div class="flex items-center gap-2 p-4 border-b border-gray-700">
+        <i class="fas fa-project-diagram text-primary-500 text-xl"></i>
+        <span class="font-bold text-lg">ProjectFlow</span>
+      </div>
+      
+      <!-- Navigation -->
+      <nav class="flex-1 py-4 overflow-y-auto">
+        <div class="px-3 mb-4">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Views</p>
+          <a href="#" class="nav-link active" data-view="my" onclick="switchView('my')">
+            <i class="fas fa-user w-5"></i> My Board
+          </a>
+          <a href="#" class="nav-link" data-view="master" onclick="switchView('master')">
+            <i class="fas fa-layer-group w-5"></i> Master Board
+          </a>
+          <a href="#" class="nav-link" data-view="timeline" onclick="switchView('timeline')">
+            <i class="fas fa-chart-gantt w-5"></i> Timeline
+          </a>
+          <a href="#" class="nav-link" data-view="analytics" onclick="switchView('analytics')">
+            <i class="fas fa-chart-bar w-5"></i> Analytics
+          </a>
+        </div>
+        
+        <div class="px-3 mb-4">
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Projects</p>
+          <div id="projectNav">
+            <a href="#" class="nav-link project-link active" data-project="" onclick="selectProject(null)">
+              <i class="fas fa-folder w-5"></i> All Projects
+            </a>
+          </div>
+          <a href="#" class="nav-link text-primary-400" onclick="openProjectModal()">
+            <i class="fas fa-plus w-5"></i> New Project
+          </a>
+        </div>
+      </nav>
+      
+      <!-- User -->
+      <div class="p-4 border-t border-gray-700">
+        <div class="flex items-center gap-3">
+          <div id="userAvatar" class="w-9 h-9 rounded-full bg-primary-500 flex items-center justify-center font-semibold text-sm">?</div>
+          <div class="flex-1 overflow-hidden">
+            <div id="userName" class="font-medium text-sm truncate">Loading...</div>
+            <div id="userEmail" class="text-xs text-gray-400 truncate"></div>
+          </div>
+          <button onclick="handleLogout()" class="text-gray-400 hover:text-white p-1 rounded" title="Logout">
+            <i class="fas fa-sign-out-alt"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+    
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <!-- Header -->
+      <header class="h-14 bg-white border-b border-gray-200 flex items-center justify-between px-4">
+        <div class="flex items-center gap-4">
+          <h1 id="viewTitle" class="text-lg font-semibold text-gray-800">My Board</h1>
+        </div>
+        <div class="flex items-center gap-3">
+          <div class="relative">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+            <input type="text" id="searchInput" placeholder="Search tasks..." 
+                   class="w-48 pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                   onkeyup="handleSearch(event)">
+          </div>
+          
+          <!-- Notification Center -->
+          <div class="relative">
+            <button id="notificationBell" onclick="toggleNotificationCenter()" 
+                    class="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
+              <i class="fas fa-bell text-lg"></i>
+              <span id="notificationBadge" class="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center hidden">0</span>
+            </button>
+            
+            <!-- Notification Dropdown -->
+            <div id="notificationCenter" class="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-50 hidden">
+              <div class="p-4 border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                  <h3 class="font-semibold text-gray-900">Notifications</h3>
+                  <div class="flex items-center gap-2">
+                    <button onclick="markAllNotificationsRead()" class="text-xs text-primary-600 hover:text-primary-700">Mark all read</button>
+                    <button onclick="openNotificationSettings()" class="text-gray-400 hover:text-gray-600">
+                      <i class="fas fa-cog text-sm"></i>
+                    </button>
+                  </div>
+                </div>
+                
+                <!-- Notification Filters -->
+                <div class="flex gap-2 mt-3">
+                  <button onclick="filterNotifications('all')" class="notification-filter active px-3 py-1 text-xs rounded-full bg-gray-100 text-gray-700">All</button>
+                  <button onclick="filterNotifications('unread')" class="notification-filter px-3 py-1 text-xs rounded-full bg-gray-100 text-gray-700">Unread</button>
+                  <button onclick="filterNotifications('mention')" class="notification-filter px-3 py-1 text-xs rounded-full bg-gray-100 text-gray-700">Mentions</button>
+                </div>
+              </div>
+              
+              <!-- Notification List -->
+              <div id="notificationList" class="max-h-96 overflow-y-auto">
+                <div id="notificationEmpty" class="p-6 text-center text-gray-500 text-sm">
+                  <i class="fas fa-bell-slash text-2xl mb-2 opacity-50"></i>
+                  <p>No notifications yet</p>
+                </div>
+              </div>
+              
+              <!-- Notification Footer -->
+              <div class="p-3 border-t border-gray-200 text-center">
+                <button onclick="viewAllNotifications()" class="text-sm text-primary-600 hover:text-primary-700">View all notifications</button>
+              </div>
+            </div>
+          </div>
+          
+          <button onclick="openTaskModal()" class="bg-primary-500 hover:bg-primary-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+            <i class="fas fa-plus"></i> New Task
+          </button>
+        </div>
+      </header>
+      
+      <!-- Stats Bar -->
+      <div class="h-14 bg-white border-b border-gray-200 flex items-center px-4 gap-6">
+        <div class="flex flex-col">
+          <span class="text-xs text-gray-500 uppercase">Total</span>
+          <span id="statTotal" class="text-xl font-bold text-gray-900">0</span>
+        </div>
+        <div class="flex flex-col">
+          <span class="text-xs text-gray-500 uppercase">Done</span>
+          <span id="statDone" class="text-xl font-bold text-green-600">0</span>
+        </div>
+        <div class="flex flex-col">
+          <span class="text-xs text-gray-500 uppercase">Due Soon</span>
+          <span id="statDueSoon" class="text-xl font-bold text-amber-600">0</span>
+        </div>
+        <div class="flex items-center gap-3 flex-1 max-w-xs">
+          <span class="text-xs text-gray-500 uppercase">Progress</span>
+          <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div id="progressBar" class="h-full bg-primary-500 rounded-full transition-all" style="width: 0%"></div>
+          </div>
+          <span id="statProgress" class="text-sm font-semibold text-gray-700">0%</span>
+        </div>
+      </div>
+      
+      <!-- Board -->
+      <div id="boardView" class="flex-1 overflow-x-auto overflow-y-hidden p-4">
+        <div id="board" class="flex gap-4 h-full">
+          <!-- Columns rendered by JS -->
+        </div>
+      </div>
+      
+      <!-- Timeline/Gantt View -->
+      <div id="timelineView" class="flex-1 overflow-hidden p-4 hidden">
+        <!-- Timeline Controls -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-4">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Project Timeline</h2>
+            <div class="flex items-center gap-3">
+              <!-- Date Range Filter -->
+              <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-600">From:</label>
+                <input type="date" id="timelineStartDate" class="px-3 py-1 border border-gray-300 rounded text-sm">
+                <label class="text-sm text-gray-600">To:</label>
+                <input type="date" id="timelineEndDate" class="px-3 py-1 border border-gray-300 rounded text-sm">
+              </div>
+              
+              <!-- View Mode Toggle -->
+              <div class="flex bg-gray-100 rounded-lg p-1">
+                <button id="ganttViewBtn" onclick="setTimelineViewMode('gantt')" 
+                        class="px-3 py-1 text-sm rounded bg-white shadow-sm font-medium text-gray-900">
+                  Gantt Chart
+                </button>
+                <button id="listViewBtn" onclick="setTimelineViewMode('list')" 
+                        class="px-3 py-1 text-sm rounded font-medium text-gray-600 hover:text-gray-900">
+                  List View
+                </button>
+              </div>
+              
+              <!-- Refresh Button -->
+              <button onclick="refreshTimeline()" class="px-3 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600">
+                <i class="fas fa-sync-alt mr-1"></i> Refresh
+              </button>
+            </div>
+          </div>
+          
+          <!-- Timeline Filters -->
+          <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
+              <label class="text-sm text-gray-600">Assignee:</label>
+              <select id="timelineAssigneeFilter" onchange="applyTimelineFilters()" class="px-3 py-1 border border-gray-300 rounded text-sm">
+                <option value="">All Assignees</option>
+              </select>
+            </div>
+            
+            <div class="flex items-center gap-2">
+              <label class="text-sm text-gray-600">Status:</label>
+              <select id="timelineStatusFilter" onchange="applyTimelineFilters()" class="px-3 py-1 border border-gray-300 rounded text-sm">
+                <option value="">All Statuses</option>
+              </select>
+            </div>
+            
+            <div class="flex items-center gap-2">
+              <label class="text-sm text-gray-600">Priority:</label>
+              <select id="timelinePriorityFilter" onchange="applyTimelineFilters()" class="px-3 py-1 border border-gray-300 rounded text-sm">
+                <option value="">All Priorities</option>
+              </select>
+            </div>
+            
+            <div class="flex items-center gap-2">
+              <input type="text" id="timelineSearchInput" placeholder="Search tasks..." 
+                     onkeyup="handleTimelineSearch(event)" 
+                     class="px-3 py-1 border border-gray-300 rounded text-sm w-48">
+            </div>
+            
+            <div class="flex items-center gap-2">
+              <label class="flex items-center text-sm text-gray-600">
+                <input type="checkbox" id="showOverdueOnly" onchange="applyTimelineFilters()" 
+                       class="mr-2 rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                Show overdue only
+              </label>
+            </div>
+            
+            <button onclick="clearTimelineFilters()" class="text-sm text-gray-500 hover:text-gray-700">
+              Clear Filters
+            </button>
+          </div>
+        </div>
+        
+        <!-- Gantt Chart Container -->
+        <div id="ganttContainer" class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+          <div id="ganttChart" class="w-full h-96"></div>
+          
+          <!-- Loading State -->
+          <div id="ganttLoading" class="flex items-center justify-center h-96 hidden">
+            <div class="flex flex-col items-center gap-3">
+              <div class="w-8 h-8 border-4 border-gray-200 border-t-primary-500 rounded-full animate-spin"></div>
+              <p class="text-gray-600 text-sm">Loading timeline data...</p>
+            </div>
+          </div>
+          
+          <!-- Empty State -->
+          <div id="ganttEmpty" class="flex items-center justify-center h-96 hidden">
+            <div class="text-center">
+              <i class="fas fa-chart-gantt text-4xl text-gray-300 mb-4"></i>
+              <h3 class="text-lg font-medium text-gray-900 mb-2">No Timeline Data</h3>
+              <p class="text-gray-600 mb-4">No tasks found with the current filters.</p>
+              <button onclick="clearTimelineFilters()" class="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600">
+                Clear Filters
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Timeline List View -->
+        <div id="timelineListContainer" class="bg-white rounded-lg shadow-sm border border-gray-200 hidden">
+          <div class="p-4 border-b border-gray-200">
+            <h3 class="font-medium text-gray-900">Timeline Tasks</h3>
+          </div>
+          <div id="timelineList" class="divide-y divide-gray-200">
+            <!-- Timeline list items rendered by JS -->
+          </div>
+        </div>
+        
+        <!-- Critical Path Analysis -->
+        <div id="criticalPathPanel" class="bg-white rounded-lg shadow-sm border border-gray-200 mt-4 hidden">
+          <div class="p-4 border-b border-gray-200">
+            <div class="flex items-center justify-between">
+              <h3 class="font-medium text-gray-900">Critical Path Analysis</h3>
+              <button onclick="toggleCriticalPathPanel()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+          <div id="criticalPathContent" class="p-4">
+            <!-- Critical path content rendered by JS -->
+          </div>
+        </div>
+      </div>
+      
+      <!-- Analytics View -->
+      <div id="analyticsView" class="flex-1 overflow-hidden p-4 hidden">
+        <!-- Analytics Header -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-semibold text-gray-900">Analytics Dashboard</h2>
+            <div class="flex items-center gap-3">
+              <!-- Time Range Filter -->
+              <div class="flex items-center gap-2">
+                <label class="text-sm text-gray-600">Time Range:</label>
+                <select id="analyticsDateRange" onchange="refreshAnalytics()" class="px-3 py-1 border border-gray-300 rounded text-sm">
+                  <option value="7">Last 7 days</option>
+                  <option value="30" selected>Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                  <option value="365">Last year</option>
+                </select>
+              </div>
+              
+              <!-- Refresh Button -->
+              <button onclick="refreshAnalytics()" class="px-3 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600">
+                <i class="fas fa-sync-alt mr-1"></i> Refresh
+              </button>
+              
+              <!-- Export Button -->
+              <button onclick="exportAnalytics()" class="px-3 py-2 bg-gray-500 text-white rounded-lg text-sm hover:bg-gray-600">
+                <i class="fas fa-download mr-1"></i> Export
+              </button>
+            </div>
+          </div>
+          
+          <!-- Quick Stats -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div class="bg-blue-50 p-4 rounded-lg">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm text-blue-600 font-medium">Total Tasks</p>
+                  <p id="analyticsStatTotal" class="text-2xl font-bold text-blue-900">0</p>
+                </div>
+                <i class="fas fa-tasks text-blue-500 text-xl"></i>
+              </div>
+            </div>
+            
+            <div class="bg-green-50 p-4 rounded-lg">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm text-green-600 font-medium">Completed</p>
+                  <p id="analyticsStatCompleted" class="text-2xl font-bold text-green-900">0</p>
+                </div>
+                <i class="fas fa-check-circle text-green-500 text-xl"></i>
+              </div>
+            </div>
+            
+            <div class="bg-amber-50 p-4 rounded-lg">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm text-amber-600 font-medium">In Progress</p>
+                  <p id="analyticsStatInProgress" class="text-2xl font-bold text-amber-900">0</p>
+                </div>
+                <i class="fas fa-clock text-amber-500 text-xl"></i>
+              </div>
+            </div>
+            
+            <div class="bg-red-50 p-4 rounded-lg">
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="text-sm text-red-600 font-medium">Overdue</p>
+                  <p id="analyticsStatOverdue" class="text-2xl font-bold text-red-900">0</p>
+                </div>
+                <i class="fas fa-exclamation-triangle text-red-500 text-xl"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Charts Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          <!-- Task Completion Trend -->
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-medium text-gray-900">Task Completion Trend</h3>
+              <div class="flex items-center gap-2">
+                <button onclick="setChartType('completionTrend', 'line')" class="chart-type-btn active px-2 py-1 text-xs rounded bg-gray-100">Line</button>
+                <button onclick="setChartType('completionTrend', 'bar')" class="chart-type-btn px-2 py-1 text-xs rounded bg-gray-100">Bar</button>
+              </div>
+            </div>
+            <div id="completionTrendChart" class="h-64">
+              <canvas id="completionTrendCanvas" width="400" height="200"></canvas>
+            </div>
+          </div>
+          
+          <!-- Priority Distribution -->
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-medium text-gray-900">Priority Distribution</h3>
+              <div class="flex items-center gap-2">
+                <button onclick="setChartType('priorityDistribution', 'pie')" class="chart-type-btn active px-2 py-1 text-xs rounded bg-gray-100">Pie</button>
+                <button onclick="setChartType('priorityDistribution', 'doughnut')" class="chart-type-btn px-2 py-1 text-xs rounded bg-gray-100">Doughnut</button>
+              </div>
+            </div>
+            <div id="priorityDistributionChart" class="h-64">
+              <canvas id="priorityDistributionCanvas" width="400" height="200"></canvas>
+            </div>
+          </div>
+          
+          <!-- Team Productivity -->
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-medium text-gray-900">Team Productivity</h3>
+              <div class="flex items-center gap-2">
+                <button onclick="setChartType('teamProductivity', 'bar')" class="chart-type-btn active px-2 py-1 text-xs rounded bg-gray-100">Bar</button>
+                <button onclick="setChartType('teamProductivity', 'horizontal')" class="chart-type-btn px-2 py-1 text-xs rounded bg-gray-100">Horizontal</button>
+              </div>
+            </div>
+            <div id="teamProductivityChart" class="h-64">
+              <canvas id="teamProductivityCanvas" width="400" height="200"></canvas>
+            </div>
+          </div>
+          
+          <!-- Project Health -->
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-medium text-gray-900">Project Health</h3>
+              <button onclick="refreshProjectHealth()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-sync-alt text-sm"></i>
+              </button>
+            </div>
+            <div id="projectHealthList" class="space-y-3">
+              <!-- Project health items rendered by JS -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- Detailed Analytics -->
+        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <!-- Recent Activity -->
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-medium text-gray-900">Recent Activity</h3>
+              <button onclick="viewAllActivity()" class="text-sm text-primary-600 hover:text-primary-700">View All</button>
+            </div>
+            <div id="recentActivityList" class="space-y-3 max-h-64 overflow-y-auto">
+              <!-- Activity items rendered by JS -->
+            </div>
+          </div>
+          
+          <!-- Top Performers -->
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-medium text-gray-900">Top Performers</h3>
+              <div class="flex items-center gap-2">
+                <select id="performanceMetric" onchange="refreshTopPerformers()" class="px-2 py-1 text-xs border border-gray-300 rounded">
+                  <option value="completed">Tasks Completed</option>
+                  <option value="velocity">Velocity</option>
+                  <option value="quality">Quality Score</option>
+                </select>
+              </div>
+            </div>
+            <div id="topPerformersList" class="space-y-3">
+              <!-- Top performers rendered by JS -->
+            </div>
+          </div>
+          
+          <!-- Bottlenecks & Issues -->
+          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-medium text-gray-900">Bottlenecks & Issues</h3>
+              <button onclick="refreshBottlenecks()" class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-sync-alt text-sm"></i>
+              </button>
+            </div>
+            <div id="bottlenecksList" class="space-y-3">
+              <!-- Bottlenecks rendered by JS -->
+            </div>
+          </div>
+        </div>
+        
+        <!-- Loading State -->
+        <div id="analyticsLoading" class="flex items-center justify-center h-96 hidden">
+          <div class="flex flex-col items-center gap-3">
+            <div class="w-8 h-8 border-4 border-gray-200 border-t-primary-500 rounded-full animate-spin"></div>
+            <p class="text-gray-600 text-sm">Loading analytics data...</p>
+          </div>
+        </div>
+        
+        <!-- Empty State -->
+        <div id="analyticsEmpty" class="flex items-center justify-center h-96 hidden">
+          <div class="text-center">
+            <i class="fas fa-chart-bar text-4xl text-gray-300 mb-4"></i>
+            <h3 class="text-lg font-medium text-gray-900 mb-2">No Analytics Data</h3>
+            <p class="text-gray-600 mb-4">No data available for the selected time range.</p>
+            <button onclick="refreshAnalytics()" class="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600">
+              Refresh Data
+            </button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Task Modal -->
+  <div id="taskModal" class="modal-overlay hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div class="flex items-center justify-between px-6 py-4 border-b">
+        <div class="flex items-center gap-3">
+          <h2 id="taskModalTitle" class="text-lg font-semibold">Create Task</h2>
+          <span id="taskIdBadge" class="text-xs font-mono bg-gray-100 text-gray-600 px-2 py-1 rounded hidden"></span>
+        </div>
+        <button onclick="closeTaskModal()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+      </div>
+      
+      <form id="taskForm" onsubmit="handleTaskSubmit(event)" class="flex-1 overflow-y-auto p-6 space-y-4">
+        <input type="hidden" id="editTaskId">
+        
+        <!-- Project & Title -->
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Project</label>
+            <select id="taskProject" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+              <option value="">No Project</option>
+            </select>
+          </div>
+          <div class="col-span-2">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Title *</label>
+            <input type="text" id="taskTitle" required placeholder="What needs to be done?" 
+                   class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+          </div>
+        </div>
+        
+        <!-- Description -->
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+          <textarea id="taskDescription" rows="3" placeholder="Add more details..." 
+                    class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500"></textarea>
+        </div>
+        
+        <!-- Status, Priority, Type -->
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+            <select id="taskStatus" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+              <!-- Options filled by JS -->
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Priority</label>
+            <select id="taskPriority" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+              <!-- Options filled by JS -->
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+            <select id="taskType" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+              <!-- Options filled by JS -->
+            </select>
+          </div>
+        </div>
+        
+        <!-- Assignee & Due Date -->
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Assignee</label>
+            <select id="taskAssignee" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Due Date</label>
+            <input type="date" id="taskDueDate" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+          </div>
+        </div>
+        
+        <!-- Story Points & Sprint -->
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Story Points</label>
+            <select id="taskStoryPoints" class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+              <option value="0">-</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="5">5</option>
+              <option value="8">8</option>
+              <option value="13">13</option>
+              <option value="21">21</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Sprint</label>
+            <input type="text" id="taskSprint" placeholder="Sprint 1" 
+                   class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Labels</label>
+            <input type="text" id="taskLabels" placeholder="bug, frontend" 
+                   class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+          </div>
+        </div>
+        
+        <!-- Comments Section (shown when editing) -->
+        <div id="commentsSection" class="hidden border-t pt-4">
+          <h3 class="text-sm font-medium text-gray-700 mb-2">Comments</h3>
+          <div id="commentsList" class="space-y-2 max-h-32 overflow-y-auto mb-2"></div>
+          <div class="comment-input-container">
+            <input type="text" id="newComment" placeholder="Add a comment... (use @email to mention users)" 
+                   class="flex-1 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500 w-full mb-2">
+            <button type="button" onclick="addNewComment()" class="px-3 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600 w-full">
+              <i class="fas fa-paper-plane mr-1"></i> Add Comment
+            </button>
+          </div>
+        </div>
+      </form>
+      
+      <div class="flex items-center justify-between px-6 py-4 border-t bg-gray-50">
+        <button type="button" id="deleteTaskBtn" onclick="handleDeleteTask()" class="hidden px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm">
+          <i class="fas fa-trash mr-1"></i> Delete
+        </button>
+        <div class="flex gap-3 ml-auto">
+          <button type="button" onclick="closeTaskModal()" class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm">Cancel</button>
+          <button type="submit" form="taskForm" class="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm">
+            <i class="fas fa-save mr-1"></i> Save
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Project Modal -->
+  <div id="projectModal" class="modal-overlay hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4 border-b">
+        <h2 class="text-lg font-semibold">New Project</h2>
+        <button onclick="closeProjectModal()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+      </div>
+      <form id="projectForm" onsubmit="handleProjectSubmit(event)" class="p-6 space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Project Name *</label>
+          <input type="text" id="projectName" required placeholder="e.g., Marketing Campaign" 
+                 class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+          <textarea id="projectDescription" rows="2" placeholder="Brief description..." 
+                    class="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-primary-500"></textarea>
+        </div>
+        <div class="flex justify-end gap-3 pt-4">
+          <button type="button" onclick="closeProjectModal()" class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm">Cancel</button>
+          <button type="submit" class="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm">
+            <i class="fas fa-plus mr-1"></i> Create
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="fixed inset-0 bg-white/80 flex items-center justify-center z-50">
+    <div class="flex flex-col items-center gap-4">
+      <div class="w-12 h-12 border-4 border-gray-200 border-t-primary-500 rounded-full animate-spin"></div>
+      <p class="text-gray-600">Loading ProjectFlow...</p>
+    </div>
+  </div>
+
+  <!-- Login Modal -->
+  <div id="loginModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+      <div class="p-6 text-center">
+        <div class="flex items-center justify-center gap-2 mb-6">
+          <i class="fas fa-project-diagram text-primary-500 text-2xl"></i>
+          <span class="font-bold text-xl">ProjectFlow</span>
+        </div>
+        <h2 class="text-lg font-semibold mb-2">Welcome Back</h2>
+        <p class="text-gray-600 mb-6">Enter your email to access your projects</p>
+        
+        <form id="loginForm" onsubmit="handleLogin(event)" class="space-y-4">
+          <div>
+            <input type="email" id="loginEmail" required placeholder="your.email@company.com" 
+                   class="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+          </div>
+          <button type="submit" class="w-full bg-primary-500 hover:bg-primary-600 text-white px-4 py-3 rounded-lg text-sm font-medium">
+            <i class="fas fa-sign-in-alt mr-2"></i> Sign In
+          </button>
+        </form>
+        
+        <div id="loginError" class="mt-4 text-red-600 text-sm hidden"></div>
+        <div id="loginHelp" class="mt-4 text-gray-500 text-xs">
+          Contact your administrator if you need access
+        </div>
+        
+        <!-- Admin Setup Button (for initial setup) -->
+        <div class="mt-4 pt-4 border-t border-gray-200">
+          <button type="button" onclick="createSampleUsers()" class="w-full text-xs text-gray-500 hover:text-primary-600 underline">
+            Create Sample Users (Admin)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Settings Modal -->
+  <div id="notificationSettingsModal" class="modal-overlay hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+      <div class="flex items-center justify-between px-6 py-4 border-b">
+        <h2 class="text-lg font-semibold">Notification Settings</h2>
+        <button onclick="closeNotificationSettings()" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+      </div>
+      
+      <div class="flex-1 overflow-y-auto p-6">
+        <p class="text-sm text-gray-600 mb-6">Choose how you want to be notified for different types of events.</p>
+        
+        <div class="space-y-6">
+          <!-- Mentions -->
+          <div class="border-b border-gray-200 pb-4">
+            <h3 class="font-medium text-gray-900 mb-3">Mentions</h3>
+            <p class="text-sm text-gray-600 mb-3">When someone mentions you in a comment</p>
+            <div class="space-y-2">
+              <label class="flex items-center">
+                <input type="checkbox" id="mention_email" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">Email notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="mention_in_app" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">In-app notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="mention_push" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                <span class="ml-2 text-sm">Push notifications</span>
+              </label>
+            </div>
+          </div>
+          
+          <!-- Task Assigned -->
+          <div class="border-b border-gray-200 pb-4">
+            <h3 class="font-medium text-gray-900 mb-3">Task Assignments</h3>
+            <p class="text-sm text-gray-600 mb-3">When a task is assigned to you</p>
+            <div class="space-y-2">
+              <label class="flex items-center">
+                <input type="checkbox" id="task_assigned_email" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">Email notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="task_assigned_in_app" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">In-app notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="task_assigned_push" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                <span class="ml-2 text-sm">Push notifications</span>
+              </label>
+            </div>
+          </div>
+          
+          <!-- Task Updates -->
+          <div class="border-b border-gray-200 pb-4">
+            <h3 class="font-medium text-gray-900 mb-3">Task Updates</h3>
+            <p class="text-sm text-gray-600 mb-3">When tasks you're involved with are updated</p>
+            <div class="space-y-2">
+              <label class="flex items-center">
+                <input type="checkbox" id="task_updated_email" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                <span class="ml-2 text-sm">Email notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="task_updated_in_app" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">In-app notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="task_updated_push" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                <span class="ml-2 text-sm">Push notifications</span>
+              </label>
+            </div>
+          </div>
+          
+          <!-- Deadlines -->
+          <div class="border-b border-gray-200 pb-4">
+            <h3 class="font-medium text-gray-900 mb-3">Deadline Reminders</h3>
+            <p class="text-sm text-gray-600 mb-3">When task deadlines are approaching</p>
+            <div class="space-y-2">
+              <label class="flex items-center">
+                <input type="checkbox" id="deadline_approaching_email" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">Email notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="deadline_approaching_in_app" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">In-app notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="deadline_approaching_push" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">Push notifications</span>
+              </label>
+            </div>
+          </div>
+          
+          <!-- Comments -->
+          <div class="pb-4">
+            <h3 class="font-medium text-gray-900 mb-3">Comments</h3>
+            <p class="text-sm text-gray-600 mb-3">When new comments are added to your tasks</p>
+            <div class="space-y-2">
+              <label class="flex items-center">
+                <input type="checkbox" id="comment_added_email" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                <span class="ml-2 text-sm">Email notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="comment_added_in_app" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" checked>
+                <span class="ml-2 text-sm">In-app notifications</span>
+              </label>
+              <label class="flex items-center">
+                <input type="checkbox" id="comment_added_push" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500">
+                <span class="ml-2 text-sm">Push notifications</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="flex items-center justify-end gap-3 px-6 py-4 border-t bg-gray-50">
+        <button type="button" onclick="closeNotificationSettings()" class="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg text-sm">Cancel</button>
+        <button type="button" onclick="saveNotificationSettings()" class="px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg text-sm">
+          <i class="fas fa-save mr-1"></i> Save Settings
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+  <?!= include('ui/Scripts'); ?>
+  <?!= include('ui/GanttChart'); ?>
+  <?!= include('ui/MentionAutocomplete'); ?>
+  <?!= include('ui/TimelineIntegration'); ?>
+</body>
+</html>

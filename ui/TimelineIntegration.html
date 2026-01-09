@@ -1,0 +1,71 @@
+<script>
+/**
+ * Timeline Integration for ProjectFlow
+ * Extends the main application with timeline/Gantt chart functionality
+ */
+
+// Store original switchView function
+const originalSwitchView = window.switchView;
+
+// Override switchView to handle timeline view
+window.switchView = function(view) {
+  if (State.loading) return;
+  
+  State.view = view;
+  
+  // Update nav
+  document.querySelectorAll('.nav-link[data-view]').forEach(link => {
+    link.classList.toggle('active', link.dataset.view === view);
+  });
+  
+  // Update title and show appropriate view
+  if (view === 'timeline') {
+    document.getElementById('viewTitle').textContent = 'Project Timeline';
+    hideTimelineView(); // Hide first to reset state
+    showTimelineView(); // Then show timeline view
+  } else {
+    document.getElementById('viewTitle').textContent = view === 'my' ? 'My Board' : 'Master Board';
+    hideTimelineView(); // Hide timeline view
+    // Load board data for kanban views
+    loadBoard();
+  }
+};
+
+// Store original loadBoard function
+const originalLoadBoard = window.loadBoard;
+
+// Override loadBoard to handle timeline view
+window.loadBoard = function() {
+  if (State.view === 'timeline') {
+    // Timeline view is handled by showTimelineView()
+    return;
+  }
+  
+  // Call original loadBoard for kanban views
+  if (originalLoadBoard) {
+    originalLoadBoard();
+  }
+};
+
+// Extend selectProject to handle timeline view
+const originalSelectProject = window.selectProject;
+
+window.selectProject = function(projectId) {
+  State.projectFilter = projectId;
+  
+  // Update nav
+  document.querySelectorAll('.project-link').forEach(link => {
+    const linkProjectId = link.dataset.project || null;
+    link.classList.toggle('active', linkProjectId === projectId);
+  });
+  
+  // Reload appropriate view
+  if (State.view === 'timeline') {
+    loadTimelineData();
+  } else {
+    loadBoard();
+  }
+};
+
+console.log('✅ TimelineIntegration.html loaded');
+</script>

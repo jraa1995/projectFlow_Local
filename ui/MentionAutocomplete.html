@@ -1,0 +1,361 @@
+<script>
+/**
+ * MentionAutocomplete - Frontend Autocomplete Component
+ * Provides real-time user mention autocomplete with keyboard navigation
+ */
+
+class MentionAutocomplete {
+  constructor(inputElement, options = {}) {
+    this.input = inputElement;
+    this.options = {
+      minQueryLength: 1,
+      maxSuggestions: 10,
+      debounceMs: 200,
+      ...options
+    };
+    
+    this.dropdown = null;
+    this.suggestions = [];
+    this.selectedIndex = -1;
+    this.isVisible = false;
+    this.currentQuery = '';
+    this.mentionStartPos = -1;
+    this.debounceTimer = null;
+    
+    this.init();
+  }
+  
+  init() {
+    this.createDropdown();
+    this.attachEventListeners();
+  }
+  
+  createDropdown() {
+    this.dropdown = document.createElement('div');
+    this.dropdown.className = 'mention-autocomplete hidden';
+    this.dropdown.id = `mention-dropdown-${Date.now()}`;
+    
+    // Position dropdown relative to input
+    this.input.parentNode.style.position = 'relative';
+    this.input.parentNode.appendChild(this.dropdown);
+  }
+  
+  attachEventListeners() {
+    // Input events
+    this.input.addEventListener('input', this.handleInput.bind(this));
+    this.input.addEventListener('keydown', this.handleKeydown.bind(this));
+    this.input.addEventListener('blur', this.handleBlur.bind(this));
+    this.input.addEventListener('focus', this.handleFocus.bind(this));
+    
+    // Dropdown events
+    this.dropdown.addEventListener('mousedown', this.handleMouseDown.bind(this));
+    this.dropdown.addEventListener('click', this.handleClick.bind(this));
+    
+    // Document events
+    document.addEventListener('click', this.handleDocumentClick.bind(this));
+  }
+  
+  handleInput(event) {
+    const { value, selectionStart } = this.input;
+    
+    // Clear existing debounce
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+    }
+    
+    // Find mention trigger (@) before cursor
+    const mentionMatch = this.findMentionAtCursor(value, selectionStart);
+    
+    if (mentionMatch) {
+      this.mentionStartPos = mentionMatch.start;
+      this.currentQuery = mentionMatch.query;
+      
+      // Debounce the search
+      this.debounceTimer = setTimeout(() => {
+        this.searchUsers(this.currentQuery);
+      }, this.options.debounceMs);
+      
+    } else {
+      this.hide();
+    }
+  }
+  
+  handleKeydown(event) {
+    if (!this.isVisible) return;
+    
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        this.selectNext();
+        break;
+        
+      case 'ArrowUp':
+        event.preventDefault();
+        this.selectPrevious();
+        break;
+        
+      case 'Enter':
+      case 'Tab':
+        event.preventDefault();
+        this.insertSelectedMention();
+        break;
+        
+      case 'Escape':
+        event.preventDefault();
+        this.hide();
+        break;
+    }
+  }
+  
+  handleBlur(event) {
+    // Delay hiding to allow dropdown clicks
+    setTimeout(() => {
+      if (!this.dropdown.contains(document.activeElement)) {
+        this.hide();
+      }
+    }, 150);
+  }
+  
+  handleFocus(event) {
+    // Re-trigger search if there's a partial mention
+    const { value, selectionStart } = this.input;
+    const mentionMatch = this.findMentionAtCursor(value, selectionStart);
+    
+    if (mentionMatch && mentionMatch.query.length >= this.options.minQueryLength) {
+      this.mentionStartPos = mentionMatch.start;
+      this.currentQuery = mentionMatch.query;
+      this.searchUsers(this.currentQuery);
+    }
+  }
+  
+  handleMouseDown(event) {
+    // Prevent input blur when clicking dropdown
+    event.preventDefault();
+  }
+  
+  handleClick(event) {
+    const suggestion = event.target.closest('.mention-suggestion');
+    if (suggestion) {
+      const index = parseInt(suggestion.dataset.index);
+      this.selectedIndex = index;
+      this.insertSelectedMention();
+    }
+  }
+  
+  handleDocumentClick(event) {
+    if (!this.input.contains(event.target) && !this.dropdown.contains(event.target)) {
+      this.hide();
+    }
+  }
+  
+  findMentionAtCursor(text, cursorPos) {
+    // Look backwards from cursor to find @ symbol
+    let start = cursorPos - 1;
+    
+    while (start >= 0 && text[start] !== '@' && text[start] !== ' ' && text[start] !== '\n') {
+      start--;
+    }
+    
+    if (start >= 0 && text[start] === '@') {
+      const query = text.substring(start + 1, cursorPos);
+      
+      // Only trigger if query doesn't contain spaces or @ symbols
+      if (!/[\s@]/.test(query)) {
+        return {
+          start: start,
+          end: cursorPos,
+          query: query
+        };
+      }
+    }
+    
+    return null;
+  }
+  
+  async searchUsers(query) {
+    if (query.length < this.options.minQueryLength) {
+      this.hide();
+      return;
+    }
+    
+    try {
+      // Call backend to get user suggestions
+      const suggestions = await new Promise((resolve, reject) => {
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(reject)
+          .getUserSuggestions(query, []);
+      });
+      
+      this.suggestions = suggestions.slice(0, this.options.maxSuggestions);
+      this.selectedIndex = -1;
+      this.renderSuggestions();
+      this.show();
+      
+    } catch (error) {
+      console.error('Failed to search users:', error);
+      this.hide();
+    }
+  }
+  
+  renderSuggestions() {
+    if (this.suggestions.length === 0) {
+      this.dropdown.innerHTML = '<div class="mention-suggestion"><div class="mention-user-info"><div class="mention-user-name">No users found</div></div></div>';
+      return;
+    }
+    
+    this.dropdown.innerHTML = this.suggestions.map((user, index) => {
+      const initials = this.getInitials(user.name);
+      const highlightedName = this.highlightQuery(user.name, this.currentQuery);
+      const highlightedEmail = this.highlightQuery(user.email, this.currentQuery);
+      
+      return `
+        <div class="mention-suggestion ${index === this.selectedIndex ? 'selected' : ''}" 
+             data-index="${index}">
+          <div class="mention-avatar">${initials}</div>
+          <div class="mention-user-info">
+            <div class="mention-user-name">${highlightedName}</div>
+            <div class="mention-user-email">${highlightedEmail}</div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  getInitials(name) {
+    return name
+      .split(' ')
+      .map(word => word[0])
+      .join('')
+      .toUpperCase()
+      .substring(0, 2);
+  }
+  
+  highlightQuery(text, query) {
+    if (!query) return this.escapeHtml(text);
+    
+    const regex = new RegExp(`(${this.escapeRegExp(query)})`, 'gi');
+    return this.escapeHtml(text).replace(regex, '<span class="mention-highlight">$1</span>');
+  }
+  
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  
+  escapeRegExp(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  
+  selectNext() {
+    if (this.suggestions.length === 0) return;
+    
+    this.selectedIndex = (this.selectedIndex + 1) % this.suggestions.length;
+    this.updateSelection();
+  }
+  
+  selectPrevious() {
+    if (this.suggestions.length === 0) return;
+    
+    this.selectedIndex = this.selectedIndex <= 0 ? 
+      this.suggestions.length - 1 : 
+      this.selectedIndex - 1;
+    this.updateSelection();
+  }
+  
+  updateSelection() {
+    const suggestions = this.dropdown.querySelectorAll('.mention-suggestion');
+    suggestions.forEach((suggestion, index) => {
+      suggestion.classList.toggle('selected', index === this.selectedIndex);
+    });
+    
+    // Scroll selected item into view
+    if (this.selectedIndex >= 0) {
+      const selected = suggestions[this.selectedIndex];
+      if (selected) {
+        selected.scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }
+  
+  insertSelectedMention() {
+    if (this.selectedIndex < 0 || this.selectedIndex >= this.suggestions.length) {
+      return;
+    }
+    
+    const user = this.suggestions[this.selectedIndex];
+    const { value } = this.input;
+    
+    // Replace the @query with @email
+    const beforeMention = value.substring(0, this.mentionStartPos);
+    const afterMention = value.substring(this.input.selectionStart);
+    const mentionText = `@${user.email}`;
+    
+    const newValue = beforeMention + mentionText + ' ' + afterMention;
+    const newCursorPos = beforeMention.length + mentionText.length + 1;
+    
+    this.input.value = newValue;
+    this.input.setSelectionRange(newCursorPos, newCursorPos);
+    
+    // Trigger input event to update any listeners
+    this.input.dispatchEvent(new Event('input', { bubbles: true }));
+    
+    this.hide();
+    this.input.focus();
+  }
+  
+  show() {
+    if (this.isVisible) return;
+    
+    this.isVisible = true;
+    this.dropdown.classList.remove('hidden');
+    this.positionDropdown();
+  }
+  
+  hide() {
+    if (!this.isVisible) return;
+    
+    this.isVisible = false;
+    this.dropdown.classList.add('hidden');
+    this.selectedIndex = -1;
+    this.suggestions = [];
+    
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+  
+  positionDropdown() {
+    const inputRect = this.input.getBoundingClientRect();
+    const parentRect = this.input.parentNode.getBoundingClientRect();
+    
+    // Position below the input
+    this.dropdown.style.top = `${inputRect.bottom - parentRect.top + 5}px`;
+    this.dropdown.style.left = `${inputRect.left - parentRect.left}px`;
+    this.dropdown.style.width = `${Math.max(inputRect.width, 250)}px`;
+  }
+  
+  destroy() {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+    }
+    
+    // Remove event listeners
+    this.input.removeEventListener('input', this.handleInput);
+    this.input.removeEventListener('keydown', this.handleKeydown);
+    this.input.removeEventListener('blur', this.handleBlur);
+    this.input.removeEventListener('focus', this.handleFocus);
+    
+    document.removeEventListener('click', this.handleDocumentClick);
+    
+    // Remove dropdown
+    if (this.dropdown && this.dropdown.parentNode) {
+      this.dropdown.parentNode.removeChild(this.dropdown);
+    }
+  }
+}
+
+console.log('✅ MentionAutocomplete component loaded');
+</script>

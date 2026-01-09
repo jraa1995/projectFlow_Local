@@ -1,0 +1,2548 @@
+<script>
+/**
+ * ProjectFlow Frontend
+ * Clean, direct architecture using google.script.run
+ * No complex API routing - just direct function calls
+ */
+
+console.log('🚀 ProjectFlow Loading...');
+
+// =============================================================================
+// STATE
+// =============================================================================
+
+const State = {
+  user: null,
+  config: null,
+  board: null,
+  projects: [],
+  users: [],
+  view: 'my',           // 'my' or 'master'
+  projectFilter: null,  // Current project filter
+  editingTaskId: null,  // Task being edited
+  loading: false
+};
+
+// =============================================================================
+// DOM HELPERS
+// =============================================================================
+
+const $ = function(id) { return document.getElementById(id); };
+const $$ = function(sel) { return document.querySelectorAll(sel); };
+const show = function(el) { if (el) el.classList.remove('hidden'); };
+const hide = function(el) { if (el) el.classList.add('hidden'); };
+
+// =============================================================================
+// DEBUG AND TESTING FUNCTIONS
+// =============================================================================
+
+/**
+ * Test view switching functionality
+ */
+function testViewSwitching() {
+  console.log('=== Testing View Switching ===');
+  
+  // Test elements exist
+  const boardView = $('boardView');
+  const timelineView = $('timelineView');
+  const analyticsView = $('analyticsView');
+  
+  console.log('Elements found:', {
+    boardView: !!boardView,
+    timelineView: !!timelineView,
+    analyticsView: !!analyticsView
+  });
+  
+  if (boardView) console.log('Board view classes:', boardView.className);
+  if (timelineView) console.log('Timeline view classes:', timelineView.className);
+  if (analyticsView) console.log('Analytics view classes:', analyticsView.className);
+  
+  // Test switching to timeline
+  console.log('Testing timeline switch...');
+  switchView('timeline');
+  
+  setTimeout(() => {
+    console.log('After timeline switch:');
+    if (timelineView) console.log('Timeline view classes:', timelineView.className);
+    if (analyticsView) console.log('Analytics view classes:', analyticsView.className);
+    if (boardView) console.log('Board view classes:', boardView.className);
+    
+    // Test switching to analytics
+    console.log('Testing analytics switch...');
+    switchView('analytics');
+    
+    setTimeout(() => {
+      console.log('After analytics switch:');
+      if (timelineView) console.log('Timeline view classes:', timelineView.className);
+      if (analyticsView) console.log('Analytics view classes:', analyticsView.className);
+      if (boardView) console.log('Board view classes:', boardView.className);
+    }, 100);
+  }, 100);
+}
+
+// Make test function available globally
+window.testViewSwitching = testViewSwitching;
+
+/**
+ * Test analytics and timeline functionality
+ */
+function testAnalyticsAndTimeline() {
+  console.log('=== Testing Analytics and Timeline Functionality ===');
+  
+  // Test 1: Check if all view elements exist
+  const boardView = $('boardView');
+  const timelineView = $('timelineView');
+  const analyticsView = $('analyticsView');
+  
+  console.log('View elements check:', {
+    boardView: !!boardView,
+    timelineView: !!timelineView,
+    analyticsView: !!analyticsView
+  });
+  
+  // Test 2: Test view switching
+  console.log('Testing view switching...');
+  
+  // Switch to timeline
+  switchView('timeline');
+  setTimeout(() => {
+    console.log('Timeline view active:', !timelineView.classList.contains('hidden'));
+    
+    // Switch to analytics
+    switchView('analytics');
+    setTimeout(() => {
+      console.log('Analytics view active:', !analyticsView.classList.contains('hidden'));
+      
+      // Switch back to board
+      switchView('my');
+      setTimeout(() => {
+        console.log('Board view active:', !boardView.classList.contains('hidden'));
+        console.log('=== Test Complete ===');
+      }, 100);
+    }, 100);
+  }, 100);
+}
+
+// Make test function available globally
+window.testAnalyticsAndTimeline = testAnalyticsAndTimeline;
+
+// =============================================================================
+// INITIALIZATION
+// =============================================================================
+
+document.addEventListener('DOMContentLoaded', init);
+
+function init() {
+  console.log('Initializing ProjectFlow...');
+  showLoading(true);
+  
+  // Try to get initial data - if it fails, show login
+  google.script.run
+    .withSuccessHandler(handleInitialData)
+    .withFailureHandler(handleInitializationError)
+    .getInitialData();
+}
+
+function handleInitializationError(error) {
+  console.error('Initialization failed:', error);
+  showLoading(false);
+  
+  // Check if it's a user authentication issue
+  if ((error && error.message && error.message.includes('Failed to load initial data')) || 
+      (error && error.message && error.message.includes('anonymous@example.com')) ||
+      !error || !error.message) {
+    // Show login modal for authentication issues
+    showLoginModal();
+  } else {
+    // Show error toast for other issues
+    toast((error && error.message) || 'Failed to initialize ProjectFlow', 'error');
+    
+    // Still show login modal as fallback
+    setTimeout(function() {
+      showLoginModal();
+    }, 2000);
+  }
+}
+
+function showLoginModal() {
+  console.log('Showing login modal');
+  const loginModal = $('loginModal');
+  if (loginModal) {
+    show(loginModal);
+    const emailInput = $('loginEmail');
+    if (emailInput) {
+      emailInput.focus();
+    }
+  } else {
+    console.error('Login modal not found');
+  }
+}
+
+function hideLoginModal() {
+  const loginModal = $('loginModal');
+  hide(loginModal);
+}
+
+function handleLogin(e) {
+  e.preventDefault();
+  
+  const email = $('loginEmail').value.trim();
+  if (!email) {
+    showLoginError('Please enter your email address');
+    return;
+  }
+  
+  // Clear any previous errors
+  hideLoginError();
+  
+  // Show loading
+  showLoading(true);
+  hideLoginModal();
+  
+  // Try to login with the provided email
+  google.script.run
+    .withSuccessHandler(handleLoginSuccess)
+    .withFailureHandler(handleLoginError)
+    .loginWithEmail(email);
+}
+
+function handleLoginSuccess(data) {
+  console.log('Login successful:', data);
+  handleInitialData(data);
+}
+
+function handleLoginError(error) {
+  console.error('Login failed:', error);
+  showLoading(false);
+  showLoginModal();
+  showLoginError((error && error.message) || 'Login failed. Please check your email and try again.');
+}
+
+function showLoginError(message) {
+  const errorDiv = $('loginError');
+  errorDiv.textContent = message;
+  show(errorDiv);
+}
+
+function hideLoginError() {
+  const errorDiv = $('loginError');
+  hide(errorDiv);
+}
+
+function handleLogout() {
+  if (!confirm('Are you sure you want to logout?')) {
+    return;
+  }
+  
+  showLoading(true);
+  
+  google.script.run
+    .withSuccessHandler(function() {
+      // Clear local state
+      State.user = null;
+      State.board = null;
+      State.projects = [];
+      State.users = [];
+      
+      // Show login modal
+      showLoading(false);
+      showLoginModal();
+      
+      // Clear form
+      $('loginEmail').value = '';
+      hideLoginError();
+    })
+    .withFailureHandler(function(error) {
+      console.error('Logout failed:', error);
+      showLoading(false);
+      toast('Logout failed', 'error');
+    })
+    .logout();
+}
+
+function createSampleUsers() {
+  if (!confirm('This will create sample users for testing. Continue?')) {
+    return;
+  }
+  
+  showLoading(true);
+  
+  google.script.run
+    .withSuccessHandler(function(result) {
+      showLoading(false);
+      alert(result.message);
+      
+      // Pre-fill with the first sample user
+      $('loginEmail').value = 'user@test.com';
+    })
+    .withFailureHandler(function(error) {
+      showLoading(false);
+      alert('Failed to create sample users: ' + ((error && error.message) || 'Unknown error'));
+    })
+    .createSampleUsers();
+}
+
+// Debug function for testing
+window.debugProjectFlow = function() {
+  console.log('ProjectFlow Debug Info:');
+  console.log('State:', State);
+  console.log('Login modal:', $('loginModal'));
+  console.log('Loading overlay:', $('loadingOverlay'));
+  
+  // Test login modal
+  showLoginModal();
+};
+
+function handleInitialData(data) {
+  console.log('Initial data received:', data);
+  
+  State.user = data.user;
+  State.config = data.config;
+  State.board = data.board;
+  State.projects = data.board.projects || [];
+  State.users = data.board.users || [];
+  
+  // Populate UI
+  updateUserInfo();
+  populateFormOptions();
+  updateProjectNav();
+  renderBoard();
+  updateStats();
+  
+  showLoading(false);
+  console.log('✅ ProjectFlow Ready');
+}
+
+// =============================================================================
+// VIEW SWITCHING
+// =============================================================================
+
+function switchView(view) {
+  console.log('switchView called with:', view);
+  if (State.loading) return;
+  
+  State.view = view;
+  
+  // Update nav
+  $$('.nav-link[data-view]').forEach(function(link) {
+    link.classList.toggle('active', link.dataset.view === view);
+  });
+  
+  // Hide all views first
+  const boardView = $('boardView');
+  const timelineView = $('timelineView');
+  const analyticsView = $('analyticsView');
+  
+  console.log('Found elements:', {
+    boardView: !!boardView,
+    timelineView: !!timelineView,
+    analyticsView: !!analyticsView
+  });
+  
+  if (boardView) boardView.classList.add('hidden');
+  if (timelineView) timelineView.classList.add('hidden');
+  if (analyticsView) analyticsView.classList.add('hidden');
+  
+  // Update title and show appropriate view
+  if (view === 'timeline') {
+    console.log('Switching to timeline view');
+    $('viewTitle').textContent = 'Project Timeline';
+    if (timelineView) {
+      timelineView.classList.remove('hidden');
+      // Show a basic message first
+      const timelineContent = timelineView.querySelector('.bg-white');
+      if (timelineContent) {
+        console.log('Timeline view is now visible');
+      }
+      initializeTimelineFilters();
+      loadTimelineData();
+    } else {
+      console.error('Timeline view element not found!');
+    }
+  } else if (view === 'analytics') {
+    console.log('Switching to analytics view');
+    $('viewTitle').textContent = 'Analytics Dashboard';
+    if (analyticsView) {
+      analyticsView.classList.remove('hidden');
+      // Show a basic message first
+      const analyticsContent = analyticsView.querySelector('.bg-white');
+      if (analyticsContent) {
+        console.log('Analytics view is now visible');
+      }
+      loadAnalyticsData();
+    } else {
+      console.error('Analytics view element not found!');
+    }
+  } else {
+    // Board views (my/master)
+    console.log('Switching to board view:', view);
+    $('viewTitle').textContent = view === 'my' ? 'My Board' : 'Master Board';
+    if (boardView) {
+      boardView.classList.remove('hidden');
+    }
+    loadBoard();
+  }
+}
+
+function selectProject(projectId) {
+  State.projectFilter = projectId;
+  
+  // Update nav
+  $$('.project-link').forEach(function(link) {
+    const linkProjectId = link.dataset.project || null;
+    link.classList.toggle('active', linkProjectId === projectId);
+  });
+  
+  loadBoard();
+}
+
+// =============================================================================
+// BOARD LOADING
+// =============================================================================
+
+function loadBoard() {
+  showLoading(true);
+  
+  const projectId = State.projectFilter || null;
+  
+  if (State.view === 'master') {
+    google.script.run
+      .withSuccessHandler(handleBoardData)
+      .withFailureHandler(handleError)
+      .loadMasterBoard(projectId);
+  } else {
+    google.script.run
+      .withSuccessHandler(handleBoardData)
+      .withFailureHandler(handleError)
+      .loadMyBoard(projectId);
+  }
+}
+
+function handleBoardData(data) {
+  console.log('Board data received:', (data && data.taskCount) || 0, 'tasks');
+  
+  State.board = data;
+  State.projects = data.projects || State.projects;
+  State.users = data.users || State.users;
+  
+  renderBoard();
+  updateStats();
+  updateProjectNav();
+  
+  showLoading(false);
+}
+
+// =============================================================================
+// BOARD RENDERING
+// =============================================================================
+
+function renderBoard() {
+  const board = $('board');
+  if (!board || !State.board || !State.board.columns) return;
+  
+  var html = '';
+  for (var i = 0; i < State.board.columns.length; i++) {
+    var col = State.board.columns[i];
+    html += '<div class="board-column" data-status="' + col.id + '">';
+    html += '<div class="column-header" style="border-top-color: ' + col.color + '">';
+    html += '<h3 class="text-sm font-semibold text-gray-700">' + escapeHtml(col.name) + '</h3>';
+    html += '<span class="text-xs font-medium bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">' + col.count + '</span>';
+    html += '</div>';
+    html += '<div class="column-body" data-status="' + col.id + '" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">';
+    
+    for (var j = 0; j < col.tasks.length; j++) {
+      html += renderTaskCard(col.tasks[j]);
+    }
+    
+    html += '</div>';
+    html += '<button class="add-task-btn" onclick="openTaskModal(\'' + col.name + '\')">';
+    html += '<i class="fas fa-plus"></i> Add Task';
+    html += '</button>';
+    html += '</div>';
+  }
+  
+  board.innerHTML = html;
+}
+
+function renderTaskCard(task) {
+  const priorityClass = (task.priority || 'medium').toLowerCase();
+  const priorityColor = getPriorityColor(task.priority);
+  const typeIcon = getTypeIcon(task.type);
+  const dueClass = getDueDateClass(task.dueDate, task.status);
+  
+  var html = '';
+  html += '<div class="task-card" draggable="true"';
+  html += ' data-id="' + task.id + '"';
+  html += ' data-status="' + task.status + '"';
+  html += ' onclick="openTaskDetail(\'' + task.id + '\')"';
+  html += ' ondragstart="handleDragStart(event)"';
+  html += ' ondragend="handleDragEnd(event)"';
+  html += ' style="border-left-color: ' + priorityColor + '">';
+  
+  html += '<div class="flex items-center justify-between mb-1">';
+  html += '<span class="type-icon">' + typeIcon + '</span>';
+  html += '<span class="text-xs font-mono text-gray-400">' + escapeHtml(task.id) + '</span>';
+  html += '</div>';
+  
+  html += '<div class="text-sm font-medium text-gray-800 mb-1">' + escapeHtml(task.title) + '</div>';
+  
+  if (task.labels && task.labels.length) {
+    html += '<div class="flex flex-wrap gap-1 mb-2">';
+    for (var i = 0; i < Math.min(task.labels.length, 2); i++) {
+      html += '<span class="label-badge">' + escapeHtml(task.labels[i]) + '</span>';
+    }
+    html += '</div>';
+  }
+  
+  html += '<div class="flex items-center justify-between text-xs">';
+  html += '<span class="priority-' + priorityClass + ' px-2 py-0.5 rounded font-medium">' + escapeHtml(task.priority || 'Medium') + '</span>';
+  if (task.dueDate) {
+    html += '<span class="' + dueClass + '">' + formatDate(task.dueDate) + '</span>';
+  }
+  html += '</div>';
+  
+  if (task.assignee) {
+    html += '<div class="mt-2 text-xs text-gray-500 flex items-center gap-1">';
+    html += '<i class="fas fa-user"></i> ' + getNameFromEmail(task.assignee);
+    html += '</div>';
+  }
+  
+  html += '</div>';
+  return html;
+}
+
+// =============================================================================
+// DRAG AND DROP
+// =============================================================================
+
+let draggedTaskId = null;
+let draggedFromStatus = null;
+
+function handleDragStart(e) {
+  draggedTaskId = e.target.dataset.id;
+  draggedFromStatus = e.target.dataset.status;
+  e.target.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragEnd(e) {
+  e.target.classList.remove('dragging');
+  var columnBodies = $$('.column-body');
+  for (var i = 0; i < columnBodies.length; i++) {
+    columnBodies[i].classList.remove('drag-over');
+  }
+}
+
+function handleDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  
+  const newStatusId = e.currentTarget.dataset.status;
+  
+  if (!draggedTaskId || !newStatusId) return;
+  
+  // Convert status ID to display name
+  const newStatus = denormalizeStatus(newStatusId);
+  
+  // Optimistic UI update - move card immediately
+  const taskCard = document.querySelector(`[data-id="${draggedTaskId}"]`);
+  if (taskCard) {
+    taskCard.dataset.status = newStatus;
+    e.currentTarget.appendChild(taskCard);
+    updateColumnCounts();
+  }
+  
+  // Send to server
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Task moved', 'success');
+    })
+    .withFailureHandler(err => {
+      handleError(err);
+      loadBoard(); // Reload on error
+    })
+    .moveTaskToStatus(draggedTaskId, newStatus, null);
+  
+  draggedTaskId = null;
+  draggedFromStatus = null;
+}
+
+function updateColumnCounts() {
+  var boardColumns = $$('.board-column');
+  for (var i = 0; i < boardColumns.length; i++) {
+    var col = boardColumns[i];
+    var count = col.querySelectorAll('.task-card').length;
+    var badge = col.querySelector('.column-header span:last-child');
+    if (badge) badge.textContent = count;
+  }
+}
+
+// =============================================================================
+// TASK MODAL
+// =============================================================================
+
+function openTaskModal(defaultStatus) {
+  // Reset form
+  $('taskForm').reset();
+  $('editTaskId').value = '';
+  $('taskModalTitle').textContent = 'Create Task';
+  hide($('taskIdBadge'));
+  hide($('deleteTaskBtn'));
+  hide($('commentsSection'));
+  State.editingTaskId = null;
+  
+  // Set defaults
+  if (defaultStatus) {
+    $('taskStatus').value = defaultStatus;
+  }
+  
+  if (State.user && State.user.email) {
+    $('taskAssignee').value = State.user.email;
+  }
+  
+  if (State.projectFilter) {
+    $('taskProject').value = State.projectFilter;
+  }
+  
+  show($('taskModal'));
+  $('taskTitle').focus();
+  
+  // Initialize comment autocomplete
+  setTimeout(() => {
+    initializeCommentAutocomplete();
+  }, 100);
+}
+
+function openTaskDetail(taskId) {
+  showLoading(true);
+  
+  google.script.run
+    .withSuccessHandler(task => {
+      showLoading(false);
+      populateTaskModal(task);
+    })
+    .withFailureHandler(handleError)
+    .loadTask(taskId);
+}
+
+function populateTaskModal(task) {
+  State.editingTaskId = task.id;
+  
+  $('editTaskId').value = task.id;
+  $('taskModalTitle').textContent = 'Edit Task';
+  $('taskIdBadge').textContent = task.id;
+  show($('taskIdBadge'));
+  show($('deleteTaskBtn'));
+  
+  $('taskProject').value = task.projectId || '';
+  $('taskTitle').value = task.title || '';
+  $('taskDescription').value = task.description || '';
+  $('taskStatus').value = task.status || 'To Do';
+  $('taskPriority').value = task.priority || 'Medium';
+  $('taskType').value = task.type || 'Task';
+  $('taskAssignee').value = task.assignee || '';
+  $('taskDueDate').value = task.dueDate ? task.dueDate.split('T')[0] : '';
+  $('taskStoryPoints').value = task.storyPoints || '0';
+  $('taskSprint').value = task.sprint || '';
+  $('taskLabels').value = Array.isArray(task.labels) ? task.labels.join(', ') : (task.labels || '');
+  
+  // Load comments
+  loadTaskComments(task.id);
+  show($('commentsSection'));
+  
+  show($('taskModal'));
+  
+  // Initialize comment autocomplete
+  setTimeout(() => {
+    initializeCommentAutocomplete();
+  }, 100);
+}
+
+function closeTaskModal() {
+  hide($('taskModal'));
+  State.editingTaskId = null;
+}
+
+function handleTaskSubmit(e) {
+  e.preventDefault();
+  
+  const taskData = {
+    projectId: $('taskProject').value,
+    title: $('taskTitle').value.trim(),
+    description: $('taskDescription').value.trim(),
+    status: $('taskStatus').value,
+    priority: $('taskPriority').value,
+    type: $('taskType').value,
+    assignee: $('taskAssignee').value,
+    dueDate: $('taskDueDate').value,
+    storyPoints: parseInt($('taskStoryPoints').value) || 0,
+    sprint: $('taskSprint').value,
+    labels: $('taskLabels').value.split(',').map(l => l.trim()).filter(l => l)
+  };
+  
+  if (!taskData.title) {
+    toast('Title is required', 'error');
+    return;
+  }
+  
+  closeTaskModal();
+  showLoading(true);
+  
+  const taskId = $('editTaskId').value;
+  
+  if (taskId) {
+    // Update existing task
+    google.script.run
+      .withSuccessHandler(() => {
+        toast('Task updated', 'success');
+        loadBoard();
+      })
+      .withFailureHandler(handleError)
+      .saveTaskUpdate(taskId, taskData);
+  } else {
+    // Create new task
+    google.script.run
+      .withSuccessHandler(newTask => {
+        toast(`Task ${newTask.id} created`, 'success');
+        loadBoard();
+      })
+      .withFailureHandler(handleError)
+      .saveNewTask(taskData);
+  }
+}
+
+function handleDeleteTask() {
+  const taskId = State.editingTaskId;
+  if (!taskId) return;
+  
+  if (!confirm('Delete this task?')) return;
+  
+  closeTaskModal();
+  showLoading(true);
+  
+  google.script.run
+    .withSuccessHandler(() => {
+      toast('Task deleted', 'success');
+      loadBoard();
+    })
+    .withFailureHandler(handleError)
+    .removeTask(taskId);
+}
+
+// =============================================================================
+// COMMENTS
+// =============================================================================
+
+let commentAutocomplete = null;
+
+function loadTaskComments(taskId) {
+  google.script.run
+    .withSuccessHandler(comments => {
+      renderComments(comments);
+    })
+    .withFailureHandler(() => {
+      $('commentsList').innerHTML = '<p class="text-sm text-gray-400">Could not load comments</p>';
+    })
+    .loadComments(taskId);
+}
+
+function renderComments(comments) {
+  const container = $('commentsList');
+  if (!container) return;
+  
+  if (!comments || comments.length === 0) {
+    container.innerHTML = '<p class="text-sm text-gray-400">No comments yet</p>';
+    return;
+  }
+  
+  container.innerHTML = comments.map(c => `
+    <div class="comment">
+      <div class="flex justify-between">
+        <span class="comment-author">${getNameFromEmail(c.userId)}</span>
+        <span class="comment-time">${formatDateTime(c.createdAt)}</span>
+      </div>
+      <div class="comment-text">${c.formattedContent || formatCommentWithMentions(c.content, c.mentionedUsers)}</div>
+    </div>
+  `).join('');
+}
+
+function formatCommentWithMentions(content, mentionedUsers) {
+  if (!content) return '';
+  
+  // If no mentioned users, return escaped content
+  if (!mentionedUsers || mentionedUsers.length === 0) {
+    return escapeHtml(content);
+  }
+  
+  // Parse mentioned users (could be string or array)
+  const mentions = typeof mentionedUsers === 'string' ? 
+    mentionedUsers.split(',').map(e => e.trim()).filter(e => e) : 
+    (Array.isArray(mentionedUsers) ? mentionedUsers : []);
+  
+  let formattedContent = escapeHtml(content);
+  
+  // Replace @email with highlighted mentions
+  mentions.forEach(email => {
+    const user = State.users.find(u => u.email === email);
+    const displayName = user ? user.name : email;
+    
+    const mentionPattern = new RegExp(`@${escapeRegExp(email)}\\b`, 'g');
+    const highlightedMention = `<span class="mention" title="${email}">@${displayName}</span>`;
+    
+    formattedContent = formattedContent.replace(mentionPattern, highlightedMention);
+  });
+  
+  return formattedContent;
+}
+
+function initializeCommentAutocomplete() {
+  const commentInput = $('newComment');
+  if (!commentInput) return;
+  
+  // Destroy existing autocomplete if it exists
+  if (commentAutocomplete) {
+    commentAutocomplete.destroy();
+  }
+  
+  // Create new autocomplete instance
+  commentAutocomplete = new MentionAutocomplete(commentInput, {
+    minQueryLength: 1,
+    maxSuggestions: 8,
+    debounceMs: 300
+  });
+}
+
+function addNewComment() {
+  const taskId = State.editingTaskId;
+  const content = $('newComment').value.trim();
+  
+  if (!taskId || !content) return;
+  
+  // Clear the input immediately for better UX
+  $('newComment').value = '';
+  
+  // Use the enhanced comment function that handles mentions on the server-side
+  google.script.run
+    .withSuccessHandler((result) => {
+      loadTaskComments(taskId);
+      
+      // Show appropriate success message based on mentions
+      if (result && result.mentionData && result.mentionData.invalidMentions && result.mentionData.invalidMentions.length > 0) {
+        const invalidCount = result.mentionData.invalidMentions.length;
+        toast(`Comment added with ${invalidCount} invalid mention(s)`, 'warning');
+      } else {
+        toast('Comment added successfully', 'success');
+      }
+    })
+    .withFailureHandler((error) => {
+      handleError(error);
+      toast('Failed to add comment', 'error');
+      // Restore the comment content on error
+      $('newComment').value = content;
+    })
+    .saveCommentWithMentions(taskId, content);
+}
+
+// =============================================================================
+// PROJECT MODAL
+// =============================================================================
+
+function openProjectModal() {
+  $('projectForm').reset();
+  show($('projectModal'));
+  $('projectName').focus();
+}
+
+function closeProjectModal() {
+  hide($('projectModal'));
+}
+
+function handleProjectSubmit(e) {
+  e.preventDefault();
+  
+  const name = $('projectName').value.trim();
+  const description = $('projectDescription').value.trim();
+  
+  if (!name) {
+    toast('Project name is required', 'error');
+    return;
+  }
+  
+  closeProjectModal();
+  showLoading(true);
+  
+  google.script.run
+    .withSuccessHandler(project => {
+      toast(`Project ${project.id} created`, 'success');
+      State.projects.push(project);
+      updateProjectNav();
+      populateFormOptions();
+      showLoading(false);
+    })
+    .withFailureHandler(handleError)
+    .saveNewProject({ name, description });
+}
+
+// =============================================================================
+// SEARCH
+// =============================================================================
+
+let searchTimeout = null;
+
+function handleSearch(e) {
+  clearTimeout(searchTimeout);
+  
+  if (e.key === 'Escape') {
+    $('searchInput').value = '';
+    loadBoard();
+    return;
+  }
+  
+  searchTimeout = setTimeout(() => {
+    const query = $('searchInput').value.trim();
+    if (!query) {
+      loadBoard();
+      return;
+    }
+    
+    showLoading(true);
+    google.script.run
+      .withSuccessHandler(tasks => {
+        renderSearchResults(query, tasks);
+        showLoading(false);
+      })
+      .withFailureHandler(handleError)
+      .searchAllTasks(query, State.projectFilter);
+  }, 300);
+}
+
+function renderSearchResults(query, tasks) {
+  const board = $('board');
+  board.innerHTML = `
+    <div class="w-full">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">
+          <i class="fas fa-search mr-2 text-gray-400"></i>
+          Results for "${escapeHtml(query)}"
+        </h2>
+        <button onclick="clearSearch()" class="text-sm text-gray-600 hover:text-primary-600">
+          <i class="fas fa-times mr-1"></i> Clear
+        </button>
+      </div>
+      <div class="grid gap-3 max-w-3xl">
+        ${tasks.length > 0 
+          ? tasks.map(renderTaskCard).join('') 
+          : '<p class="text-gray-500 text-center py-8">No tasks found</p>'}
+      </div>
+    </div>
+  `;
+  
+  updateStats({ total: tasks.length, completed: tasks.filter(t => t.status === 'Done').length });
+}
+
+function clearSearch() {
+  $('searchInput').value = '';
+  loadBoard();
+}
+
+// =============================================================================
+// UI HELPERS
+// =============================================================================
+
+function updateUserInfo() {
+  const user = State.user;
+  if (!user) return;
+  
+  $('userName').textContent = user.name || (user.email && user.email.split('@')[0]) || 'User';
+  $('userEmail').textContent = user.email || '';
+  $('userAvatar').textContent = getInitials(user.name || user.email);
+}
+
+function updateStats(customStats) {
+  const stats = customStats || (State.board && State.board.stats) || {};
+  
+  $('statTotal').textContent = stats.total || 0;
+  $('statDone').textContent = stats.completed || 0;
+  $('statDueSoon').textContent = stats.dueSoon || 0;
+  $('statProgress').textContent = `${stats.progress || 0}%`;
+  $('progressBar').style.width = `${stats.progress || 0}%`;
+}
+
+function updateProjectNav() {
+  const container = $('projectNav');
+  if (!container) return;
+  
+  const projects = State.projects || [];
+  
+  container.innerHTML = `
+    <a href="#" class="nav-link project-link ${!State.projectFilter ? 'active' : ''}" 
+       data-project="" onclick="selectProject(null)">
+      <i class="fas fa-folder w-5"></i> All Projects
+    </a>
+    ${projects.map(p => `
+      <a href="#" class="nav-link project-link ${State.projectFilter === p.id ? 'active' : ''}" 
+         data-project="${p.id}" onclick="selectProject('${p.id}')">
+        <i class="fas fa-folder w-5"></i> ${escapeHtml(p.name)}
+      </a>
+    `).join('')}
+  `;
+}
+
+function populateFormOptions() {
+  const config = State.config || {};
+  
+  // Status options
+  const statusSelect = $('taskStatus');
+  if (statusSelect) {
+    statusSelect.innerHTML = (config.statuses || []).map(s => 
+      `<option value="${s}">${s}</option>`
+    ).join('');
+  }
+  
+  // Priority options
+  const prioritySelect = $('taskPriority');
+  if (prioritySelect) {
+    prioritySelect.innerHTML = (config.priorities || []).map(p => 
+      `<option value="${p}" ${p === 'Medium' ? 'selected' : ''}>${p}</option>`
+    ).join('');
+  }
+  
+  // Type options
+  const typeSelect = $('taskType');
+  if (typeSelect) {
+    typeSelect.innerHTML = (config.types || []).map(t => 
+      `<option value="${t}">${t}</option>`
+    ).join('');
+  }
+  
+  // Project options
+  const projectSelect = $('taskProject');
+  if (projectSelect) {
+    projectSelect.innerHTML = '<option value="">No Project</option>' + 
+      (State.projects || []).map(p => 
+        `<option value="${p.id}">${escapeHtml(p.name)} (${p.id})</option>`
+      ).join('');
+  }
+  
+  // Assignee options
+  const assigneeSelect = $('taskAssignee');
+  if (assigneeSelect) {
+    assigneeSelect.innerHTML = '<option value="">Unassigned</option>' +
+      (State.users || []).map(u => 
+        `<option value="${u.email}">${escapeHtml(u.name || u.email)}</option>`
+      ).join('');
+  }
+}
+
+function showLoading(show) {
+  State.loading = show;
+  const overlay = $('loadingOverlay');
+  if (overlay) {
+    if (show) {
+      overlay.classList.remove('hidden');
+    } else {
+      overlay.classList.add('hidden');
+    }
+  }
+}
+
+function toast(message, type = 'info') {
+  const container = $('toastContainer');
+  if (!container) return;
+  
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  
+  const icons = {
+    success: 'fa-check-circle',
+    error: 'fa-exclamation-circle',
+    warning: 'fa-exclamation-triangle',
+    info: 'fa-info-circle'
+  };
+  
+  toast.innerHTML = `<i class="fas ${icons[type] || icons.info}"></i><span>${escapeHtml(message)}</span>`;
+  container.appendChild(toast);
+  
+  requestAnimationFrame(() => toast.classList.add('show'));
+  
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+function handleError(error) {
+  console.error('Error:', error);
+  showLoading(false);
+  toast((error && error.message) || 'An error occurred', 'error');
+}
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function escapeRegExp(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getInitials(name) {
+  if (!name) return '?';
+  return name.split(/[@\s]+/).filter(p => p).slice(0, 2).map(p => p[0].toUpperCase()).join('');
+}
+
+function getNameFromEmail(email) {
+  if (!email) return 'Unknown';
+  // Check if we have user info cached
+  const user = State.users && State.users.find(function(u) { return u.email === email; });
+  if (user && user.name) return user.name;
+  return email.split('@')[0].replace(/[._]/g, ' ');
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diff = Math.floor((date - now) / (1000 * 60 * 60 * 24));
+  
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatDateTime(dateStr) {
+  if (!dateStr) return '';
+  return new Date(dateStr).toLocaleString('en-US', { 
+    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
+  });
+}
+
+function getDueDateClass(dueDate, status) {
+  if (!dueDate || status === 'Done') return 'due-normal';
+  const due = new Date(dueDate);
+  const now = new Date();
+  const diff = (due - now) / (1000 * 60 * 60 * 24);
+  
+  if (diff < 0) return 'due-overdue';
+  if (diff <= 3) return 'due-soon';
+  return 'due-normal';
+}
+
+function getPriorityColor(priority) {
+  const colors = {
+    'Lowest': '#22c55e',
+    'Low': '#16a34a',
+    'Medium': '#f59e0b',
+    'High': '#ea580c',
+    'Highest': '#ef4444',
+    'Critical': '#dc2626'
+  };
+  return colors[priority] || colors['Medium'];
+}
+
+function getTypeIcon(type) {
+  const icons = {
+    'Task': '<i class="fas fa-check-square text-blue-500"></i>',
+    'Bug': '<i class="fas fa-bug text-red-500"></i>',
+    'Feature': '<i class="fas fa-star text-green-500"></i>',
+    'Story': '<i class="fas fa-book text-purple-500"></i>',
+    'Epic': '<i class="fas fa-bolt text-amber-500"></i>',
+    'Spike': '<i class="fas fa-flask text-cyan-500"></i>'
+  };
+  return icons[type] || icons['Task'];
+}
+
+function normalizeStatus(status) {
+  if (!status) return 'backlog';
+  return String(status).toLowerCase().replace(/\s+/g, '_');
+}
+
+function denormalizeStatus(statusId) {
+  const config = State.config || {};
+  const statuses = config.statuses || ['Backlog', 'To Do', 'In Progress', 'Review', 'Testing', 'Done'];
+  
+  const statusMap = {};
+  statuses.forEach(s => {
+    statusMap[s.toLowerCase().replace(/\s+/g, '_')] = s;
+  });
+  
+  return statusMap[statusId] || statusId;
+}
+
+// =============================================================================
+// NOTIFICATION CENTER
+// =============================================================================
+
+let notificationState = {
+  notifications: [],
+  unreadCount: 0,
+  currentFilter: 'all',
+  isOpen: false
+};
+
+/**
+ * Initialize notification center
+ */
+function initNotificationCenter() {
+  // Load initial notifications
+  loadNotifications();
+  
+  // Set up periodic refresh
+  setInterval(loadNotifications, 30000); // Refresh every 30 seconds
+  
+  // Close notification center when clicking outside
+  document.addEventListener('click', function(e) {
+    const notificationCenter = $('notificationCenter');
+    const notificationBell = $('notificationBell');
+    
+    if (notificationState.isOpen && 
+        !notificationCenter.contains(e.target) && 
+        !notificationBell.contains(e.target)) {
+      closeNotificationCenter();
+    }
+  });
+}
+
+/**
+ * Load notifications from server
+ */
+function loadNotifications() {
+  google.script.run
+    .withSuccessHandler(handleNotificationsLoaded)
+    .withFailureHandler(handleNotificationError)
+    .loadNotifications(50, false); // Load 50 notifications, include read ones
+}
+
+/**
+ * Handle notifications loaded from server
+ */
+function handleNotificationsLoaded(notifications) {
+  // Ensure notifications is always an array
+  if (!Array.isArray(notifications)) {
+    console.warn('Notifications response is not an array:', notifications);
+    notifications = [];
+  }
+  
+  notificationState.notifications = notifications;
+  notificationState.unreadCount = notifications.filter(n => !n.read).length;
+  
+  updateNotificationBadge();
+  renderNotificationList();
+}
+
+/**
+ * Handle notification loading error
+ */
+function handleNotificationError(error) {
+  console.error('Failed to load notifications:', error);
+  
+  // Set empty state to prevent further errors
+  notificationState.notifications = [];
+  notificationState.unreadCount = 0;
+  updateNotificationBadge();
+  renderNotificationList();
+  
+  // Only show toast if it's not during initial load
+  if (notificationState.isOpen) {
+    toast('Failed to load notifications', 'error');
+  }
+}
+
+/**
+ * Toggle notification center dropdown
+ */
+function toggleNotificationCenter() {
+  const notificationCenter = $('notificationCenter');
+  
+  if (notificationState.isOpen) {
+    closeNotificationCenter();
+  } else {
+    openNotificationCenter();
+  }
+}
+
+/**
+ * Open notification center
+ */
+function openNotificationCenter() {
+  const notificationCenter = $('notificationCenter');
+  show(notificationCenter);
+  notificationState.isOpen = true;
+  
+  // Load fresh notifications when opening
+  loadNotifications();
+}
+
+/**
+ * Close notification center
+ */
+function closeNotificationCenter() {
+  const notificationCenter = $('notificationCenter');
+  hide(notificationCenter);
+  notificationState.isOpen = false;
+}
+
+/**
+ * Update notification badge
+ */
+function updateNotificationBadge() {
+  const badge = $('notificationBadge');
+  
+  if (notificationState.unreadCount > 0) {
+    badge.textContent = notificationState.unreadCount > 99 ? '99+' : notificationState.unreadCount;
+    show(badge);
+  } else {
+    hide(badge);
+  }
+}
+
+/**
+ * Render notification list
+ */
+function renderNotificationList() {
+  const notificationList = $('notificationList');
+  const notificationEmpty = $('notificationEmpty');
+  
+  // Filter notifications based on current filter
+  let filteredNotifications = notificationState.notifications;
+  
+  switch (notificationState.currentFilter) {
+    case 'unread':
+      filteredNotifications = notificationState.notifications.filter(n => !n.read);
+      break;
+    case 'mention':
+      filteredNotifications = notificationState.notifications.filter(n => n.type === 'mention');
+      break;
+    default:
+      // 'all' - no filtering
+      break;
+  }
+  
+  if (filteredNotifications.length === 0) {
+    show(notificationEmpty);
+    notificationList.innerHTML = notificationEmpty.outerHTML;
+    return;
+  }
+  
+  hide(notificationEmpty);
+  
+  const notificationsHtml = filteredNotifications.map(notification => {
+    return renderNotificationItem(notification);
+  }).join('');
+  
+  notificationList.innerHTML = notificationsHtml;
+}
+
+/**
+ * Render individual notification item
+ */
+function renderNotificationItem(notification) {
+  const isUnread = !notification.read;
+  const timeAgo = getTimeAgo(notification.createdAt);
+  const icon = getNotificationIcon(notification.type);
+  
+  return `
+    <div class="notification-item p-3 hover:bg-gray-50 border-b border-gray-100 cursor-pointer ${isUnread ? 'bg-blue-50' : ''}" 
+         onclick="handleNotificationClick('${notification.id}')">
+      <div class="flex items-start gap-3">
+        <div class="flex-shrink-0 mt-1">
+          ${icon}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center justify-between">
+            <p class="text-sm font-medium text-gray-900 truncate">
+              ${notification.title}
+            </p>
+            ${isUnread ? '<div class="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0"></div>' : ''}
+          </div>
+          <p class="text-sm text-gray-600 mt-1 line-clamp-2">
+            ${notification.message}
+          </p>
+          <div class="flex items-center justify-between mt-2">
+            <span class="text-xs text-gray-500">${timeAgo}</span>
+            <div class="flex items-center gap-2">
+              ${getNotificationTypeLabel(notification.type)}
+              ${!isUnread ? '' : '<button onclick="markNotificationRead(\'' + notification.id + '\', event)" class="text-xs text-blue-600 hover:text-blue-700">Mark read</button>'}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Get notification icon based on type
+ */
+function getNotificationIcon(type) {
+  const icons = {
+    mention: '<i class="fas fa-at text-blue-500"></i>',
+    task_assigned: '<i class="fas fa-user-plus text-green-500"></i>',
+    task_updated: '<i class="fas fa-edit text-amber-500"></i>',
+    deadline_approaching: '<i class="fas fa-clock text-red-500"></i>',
+    project_update: '<i class="fas fa-project-diagram text-purple-500"></i>',
+    comment_added: '<i class="fas fa-comment text-gray-500"></i>'
+  };
+  
+  return icons[type] || '<i class="fas fa-bell text-gray-500"></i>';
+}
+
+/**
+ * Get notification type label
+ */
+function getNotificationTypeLabel(type) {
+  const labels = {
+    mention: 'Mention',
+    task_assigned: 'Assignment',
+    task_updated: 'Update',
+    deadline_approaching: 'Deadline',
+    project_update: 'Project',
+    comment_added: 'Comment'
+  };
+  
+  const label = labels[type] || 'Notification';
+  return `<span class="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">${label}</span>`;
+}
+
+/**
+ * Get time ago string
+ */
+function getTimeAgo(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffInSeconds = Math.floor((now - date) / 1000);
+  
+  if (diffInSeconds < 60) return 'Just now';
+  if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+  if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+  if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
+  
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
+ * Handle notification click
+ */
+function handleNotificationClick(notificationId) {
+  const notification = notificationState.notifications.find(n => n.id === notificationId);
+  
+  if (!notification) return;
+  
+  // Mark as read if unread
+  if (!notification.read) {
+    markNotificationRead(notificationId);
+  }
+  
+  // Navigate to related entity
+  if (notification.entityType === 'task' && notification.entityId) {
+    // Close notification center
+    closeNotificationCenter();
+    
+    // Open task modal
+    openTaskModal(null, notification.entityId);
+  }
+}
+
+/**
+ * Mark notification as read
+ */
+function markNotificationRead(notificationId, event) {
+  if (event) {
+    event.stopPropagation();
+  }
+  
+  google.script.run
+    .withSuccessHandler(() => {
+      // Update local state
+      const notification = notificationState.notifications.find(n => n.id === notificationId);
+      if (notification) {
+        notification.read = true;
+        notificationState.unreadCount = Math.max(0, notificationState.unreadCount - 1);
+        updateNotificationBadge();
+        renderNotificationList();
+      }
+    })
+    .withFailureHandler(handleNotificationError)
+    .markNotificationRead(notificationId);
+}
+
+/**
+ * Mark all notifications as read
+ */
+function markAllNotificationsRead() {
+  const unreadNotifications = notificationState.notifications.filter(n => !n.read);
+  
+  if (unreadNotifications.length === 0) {
+    toast('No unread notifications', 'info');
+    return;
+  }
+  
+  // Mark all as read locally first for immediate UI feedback
+  unreadNotifications.forEach(notification => {
+    notification.read = true;
+  });
+  
+  notificationState.unreadCount = 0;
+  updateNotificationBadge();
+  renderNotificationList();
+  
+  // Send requests to server
+  unreadNotifications.forEach(notification => {
+    google.script.run
+      .withFailureHandler(handleNotificationError)
+      .markNotificationRead(notification.id);
+  });
+  
+  toast('All notifications marked as read', 'success');
+}
+
+/**
+ * Filter notifications
+ */
+function filterNotifications(filter) {
+  notificationState.currentFilter = filter;
+  
+  // Update filter buttons
+  $$('.notification-filter').forEach(btn => {
+    btn.classList.remove('active', 'bg-primary-100', 'text-primary-700');
+    btn.classList.add('bg-gray-100', 'text-gray-700');
+  });
+  
+  const activeBtn = document.querySelector(`[onclick="filterNotifications('${filter}')"]`);
+  if (activeBtn) {
+    activeBtn.classList.remove('bg-gray-100', 'text-gray-700');
+    activeBtn.classList.add('active', 'bg-primary-100', 'text-primary-700');
+  }
+  
+  renderNotificationList();
+}
+
+/**
+ * Open notification settings modal
+ */
+function openNotificationSettings() {
+  closeNotificationCenter();
+  
+  // Load current preferences
+  google.script.run
+    .withSuccessHandler(handleNotificationPreferencesLoaded)
+    .withFailureHandler(handleNotificationError)
+    .getNotificationPreferences();
+  
+  show($('notificationSettingsModal'));
+}
+
+/**
+ * Handle notification preferences loaded
+ */
+function handleNotificationPreferencesLoaded(preferences) {
+  // Populate form with current preferences
+  Object.keys(preferences).forEach(type => {
+    Object.keys(preferences[type]).forEach(channel => {
+      const checkbox = $(`${type}_${channel}`);
+      if (checkbox) {
+        checkbox.checked = preferences[type][channel];
+      }
+    });
+  });
+}
+
+/**
+ * Close notification settings modal
+ */
+function closeNotificationSettings() {
+  hide($('notificationSettingsModal'));
+}
+
+/**
+ * Save notification settings
+ */
+function saveNotificationSettings() {
+  const preferences = {};
+  
+  // Collect preferences from form
+  const notificationTypes = ['mention', 'task_assigned', 'task_updated', 'deadline_approaching', 'comment_added'];
+  const channels = ['email', 'in_app', 'push'];
+  
+  notificationTypes.forEach(type => {
+    preferences[type] = {};
+    channels.forEach(channel => {
+      const checkbox = $(`${type}_${channel}`);
+      if (checkbox) {
+        preferences[type][channel] = checkbox.checked;
+      }
+    });
+  });
+  
+  // Save to server
+  google.script.run
+    .withSuccessHandler(() => {
+      closeNotificationSettings();
+      toast('Notification settings saved', 'success');
+    })
+    .withFailureHandler(handleNotificationError)
+    .updateNotificationPreferences(preferences);
+}
+
+/**
+ * View all notifications (placeholder for full notifications page)
+ */
+function viewAllNotifications() {
+  closeNotificationCenter();
+  toast('Full notifications page coming soon', 'info');
+}
+
+// Initialize notification center when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+  // Add small delay to ensure other initialization is complete
+  setTimeout(initNotificationCenter, 1000);
+});
+
+// =============================================================================
+// KEYBOARD SHORTCUTS
+// =============================================================================
+
+document.addEventListener('keydown', function(e) {
+  // Escape to close modals
+  if (e.key === 'Escape') {
+    closeTaskModal();
+    closeProjectModal();
+    closeNotificationCenter();
+    closeNotificationSettings();
+  }
+  
+  // Ctrl/Cmd + N for new task
+  if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+    e.preventDefault();
+    openTaskModal('To Do');
+  }
+  
+  // Ctrl/Cmd + / to focus search
+  if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+    e.preventDefault();
+    const searchInput = $('searchInput');
+    if (searchInput) {
+      searchInput.focus();
+    }
+  }
+});
+
+console.log('✅ ProjectFlow Scripts Loaded');
+</script>
+
+// =============================================================================
+// ANALYTICS VIEW FUNCTIONS (NEW IMPLEMENTATION)
+// =============================================================================
+
+/**
+ * Show analytics view and hide other views
+ */
+function showAnalyticsView() {
+  // Hide other views
+  const boardView = $('boardView');
+  const timelineView = $('timelineView');
+  const analyticsView = $('analyticsView');
+  
+  if (boardView) boardView.classList.add('hidden');
+  if (timelineView) timelineView.classList.add('hidden');
+  
+  // Show analytics view (now part of HTML)
+  if (analyticsView) analyticsView.classList.remove('hidden');
+  
+  // Load analytics data
+  loadAnalyticsData();
+}
+
+/**
+ * Hide analytics view
+ */
+function hideAnalyticsView() {
+  const analyticsView = $('analyticsView');
+  if (analyticsView) {
+    analyticsView.classList.add('hidden');
+  }
+}
+
+/**
+ * Create analytics view HTML structure
+ */
+function createAnalyticsView() {
+  const main = document.querySelector('main');
+  if (!main) return null;
+  
+  const analyticsHTML = `
+    <div id="analyticsView" class="flex-1 overflow-hidden p-4 hidden">
+      <!-- Analytics Header -->
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-xl font-semibold text-gray-900">Analytics Dashboard</h2>
+          <div class="flex items-center gap-3">
+            <!-- Date Range Filter -->
+            <div class="flex items-center gap-2">
+              <label class="text-sm text-gray-600">Period:</label>
+              <select id="analyticsDateRange" onchange="loadAnalyticsData()" class="px-3 py-1 border border-gray-300 rounded text-sm">
+                <option value="7">Last 7 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+                <option value="365">Last year</option>
+              </select>
+            </div>
+            
+            <!-- Refresh Button -->
+            <button onclick="loadAnalyticsData()" class="px-3 py-2 bg-primary-500 text-white rounded-lg text-sm hover:bg-primary-600">
+              <i class="fas fa-sync-alt mr-1"></i> Refresh
+            </button>
+          </div>
+        </div>
+        
+        <!-- Key Metrics -->
+        <div id="analyticsMetrics" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div class="bg-blue-50 p-4 rounded-lg">
+            <div class="text-2xl font-bold text-blue-600" id="totalTasks">-</div>
+            <div class="text-blue-800 text-sm">Total Tasks</div>
+          </div>
+          <div class="bg-green-50 p-4 rounded-lg">
+            <div class="text-2xl font-bold text-green-600" id="completedTasks">-</div>
+            <div class="text-green-800 text-sm">Completed</div>
+          </div>
+          <div class="bg-orange-50 p-4 rounded-lg">
+            <div class="text-2xl font-bold text-orange-600" id="inProgressTasks">-</div>
+            <div class="text-orange-800 text-sm">In Progress</div>
+          </div>
+          <div class="bg-red-50 p-4 rounded-lg">
+            <div class="text-2xl font-bold text-red-600" id="overdueTasks">-</div>
+            <div class="text-red-800 text-sm">Overdue</div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Charts Row -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Task Completion Chart -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Task Completion Trend</h3>
+          <div id="completionChart" class="h-64 flex items-center justify-center text-gray-500">
+            <div class="text-center">
+              <i class="fas fa-chart-line text-4xl mb-2"></i>
+              <p>Loading chart...</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Priority Distribution -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Priority Distribution</h3>
+          <div id="priorityChart" class="h-64 flex items-center justify-center text-gray-500">
+            <div class="text-center">
+              <i class="fas fa-chart-pie text-4xl mb-2"></i>
+              <p>Loading chart...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Team Performance -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <!-- Team Productivity -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Team Productivity</h3>
+          <div id="teamProductivity" class="space-y-3">
+            <div class="text-center text-gray-500 py-8">
+              <i class="fas fa-users text-4xl mb-2"></i>
+              <p>Loading team data...</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Project Health -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Project Health</h3>
+          <div id="projectHealth" class="space-y-3">
+            <div class="text-center text-gray-500 py-8">
+              <i class="fas fa-heartbeat text-4xl mb-2"></i>
+              <p>Loading project health...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Recent Activity -->
+      <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+        <div id="recentActivity" class="space-y-3">
+          <div class="text-center text-gray-500 py-8">
+            <i class="fas fa-clock text-4xl mb-2"></i>
+            <p>Loading recent activity...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  // Insert analytics view after timeline view
+  const timelineView = $('timelineView');
+  if (timelineView) {
+    timelineView.insertAdjacentHTML('afterend', analyticsHTML);
+  } else {
+    main.insertAdjacentHTML('beforeend', analyticsHTML);
+  }
+  
+  return $('analyticsView');
+}
+
+/**
+ * Refresh analytics data
+ */
+function refreshAnalytics() {
+  loadAnalyticsData();
+}
+
+/**
+ * Load analytics data from server
+ */
+function loadAnalyticsData() {
+  console.log('Loading analytics data...');
+  const dateRange = $('analyticsDateRange')?.value || '30';
+  
+  // Show loading state
+  showAnalyticsLoading(true);
+  
+  // Add timeout to prevent hanging
+  const timeoutId = setTimeout(() => {
+    console.warn('Analytics data loading timed out');
+    showAnalyticsLoading(false);
+    toast('Analytics data loading timed out', 'warning');
+  }, 10000);
+  
+  google.script.run
+    .withSuccessHandler(function(analyticsData) {
+      clearTimeout(timeoutId);
+      handleAnalyticsData(analyticsData);
+    })
+    .withFailureHandler(function(error) {
+      clearTimeout(timeoutId);
+      handleAnalyticsError(error);
+    })
+    .getAnalyticsData(parseInt(dateRange));
+}
+
+/**
+ * Handle analytics data response
+ */
+function handleAnalyticsData(analyticsData) {
+  console.log('Analytics data received:', analyticsData);
+  
+  showAnalyticsLoading(false);
+  
+  if (!analyticsData) {
+    toast('No analytics data available', 'warning');
+    return;
+  }
+  
+  // Update key metrics
+  updateAnalyticsMetrics(analyticsData.metrics);
+  
+  // Update charts
+  updateCompletionChart(analyticsData.completionTrend);
+  updatePriorityChart(analyticsData.priorityDistribution);
+  
+  // Update team productivity
+  updateTeamProductivity(analyticsData.teamProductivity);
+  
+  // Update project health
+  updateProjectHealth(analyticsData.projectHealth);
+  
+  // Update recent activity
+  updateRecentActivity(analyticsData.recentActivity);
+}
+
+/**
+ * Handle analytics data error
+ */
+function handleAnalyticsError(error) {
+  console.error('Analytics data error:', error);
+  showAnalyticsLoading(false);
+  toast('Failed to load analytics data: ' + (error.message || 'Unknown error'), 'error');
+}
+
+/**
+ * Show/hide analytics loading state
+ */
+function showAnalyticsLoading(show) {
+  // For now, just log the loading state
+  console.log('Analytics loading:', show);
+}
+
+/**
+ * Update analytics metrics display
+ */
+function updateAnalyticsMetrics(metrics) {
+  if (!metrics) return;
+  
+  const totalTasks = $('totalTasks');
+  const completedTasks = $('completedTasks');
+  const inProgressTasks = $('inProgressTasks');
+  const overdueTasks = $('overdueTasks');
+  
+  if (totalTasks) totalTasks.textContent = metrics.total || 0;
+  if (completedTasks) completedTasks.textContent = metrics.completed || 0;
+  if (inProgressTasks) inProgressTasks.textContent = metrics.inProgress || 0;
+  if (overdueTasks) overdueTasks.textContent = metrics.overdue || 0;
+}
+
+/**
+ * Update completion chart
+ */
+function updateCompletionChart(completionData) {
+  const container = $('completionChart');
+  if (!container || !completionData) return;
+  
+  // Simple text-based chart for now
+  container.innerHTML = `
+    <div class="w-full">
+      <div class="space-y-2">
+        ${completionData.map(item => `
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-gray-600">${item.date}</span>
+            <div class="flex items-center gap-2">
+              <div class="w-32 bg-gray-200 rounded-full h-2">
+                <div class="bg-green-500 h-2 rounded-full" style="width: ${(item.completed / item.total * 100)}%"></div>
+              </div>
+              <span class="text-sm font-medium">${item.completed}/${item.total}</span>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Update priority chart
+ */
+function updatePriorityChart(priorityData) {
+  const container = $('priorityChart');
+  if (!container || !priorityData) return;
+  
+  const total = priorityData.reduce((sum, item) => sum + item.count, 0);
+  
+  container.innerHTML = `
+    <div class="w-full space-y-3">
+      ${priorityData.map(item => `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <div class="w-4 h-4 rounded-full bg-${getPriorityColor(item.priority)}-500"></div>
+            <span class="text-sm text-gray-700">${item.priority}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <div class="w-24 bg-gray-200 rounded-full h-2">
+              <div class="bg-${getPriorityColor(item.priority)}-500 h-2 rounded-full" style="width: ${(item.count / total * 100)}%"></div>
+            </div>
+            <span class="text-sm font-medium">${item.count}</span>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/**
+ * Update team productivity display
+ */
+function updateTeamProductivity(teamData) {
+  const container = $('teamProductivity');
+  if (!container || !teamData) return;
+  
+  container.innerHTML = `
+    <div class="space-y-3">
+      ${teamData.map(member => `
+        <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 bg-primary-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+              ${getInitials(member.name)}
+            </div>
+            <div>
+              <div class="font-medium text-gray-900">${member.name}</div>
+              <div class="text-sm text-gray-600">${member.tasksCompleted} tasks completed</div>
+            </div>
+          </div>
+          <div class="text-right">
+            <div class="text-lg font-semibold text-gray-900">${member.productivity}%</div>
+            <div class="text-xs text-gray-500">Productivity</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/**
+ * Update project health display
+ */
+function updateProjectHealth(healthData) {
+  const container = $('projectHealth');
+  if (!container || !healthData) return;
+  
+  container.innerHTML = `
+    <div class="space-y-4">
+      ${healthData.map(project => `
+        <div class="p-3 border border-gray-200 rounded-lg">
+          <div class="flex items-center justify-between mb-2">
+            <div class="font-medium text-gray-900">${project.name}</div>
+            <div class="flex items-center gap-1">
+              <div class="w-3 h-3 rounded-full bg-${getHealthColor(project.health)}-500"></div>
+              <span class="text-sm text-${getHealthColor(project.health)}-700 capitalize">${project.health}</span>
+            </div>
+          </div>
+          <div class="text-sm text-gray-600 mb-2">${project.tasksCompleted}/${project.totalTasks} tasks completed</div>
+          <div class="w-full bg-gray-200 rounded-full h-2">
+            <div class="bg-${getHealthColor(project.health)}-500 h-2 rounded-full" style="width: ${project.progress}%"></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/**
+ * Update recent activity display
+ */
+function updateRecentActivity(activityData) {
+  const container = $('recentActivity');
+  if (!container || !activityData) return;
+  
+  container.innerHTML = `
+    <div class="space-y-3">
+      ${activityData.slice(0, 10).map(activity => `
+        <div class="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+          <div class="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white text-xs">
+            <i class="fas fa-${getActivityIcon(activity.type)}"></i>
+          </div>
+          <div class="flex-1">
+            <div class="text-sm text-gray-900">${activity.description}</div>
+            <div class="text-xs text-gray-500 mt-1">${formatDateTime(activity.timestamp)} • ${activity.user}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/**
+ * Get priority color for charts
+ */
+function getPriorityColor(priority) {
+  switch (priority?.toLowerCase()) {
+    case 'critical': return 'red';
+    case 'high': case 'highest': return 'orange';
+    case 'medium': return 'yellow';
+    case 'low': case 'lowest': return 'green';
+    default: return 'gray';
+  }
+}
+
+/**
+ * Get health color for projects
+ */
+function getHealthColor(health) {
+  switch (health?.toLowerCase()) {
+    case 'excellent': case 'good': return 'green';
+    case 'warning': case 'at-risk': return 'yellow';
+    case 'critical': case 'poor': return 'red';
+    default: return 'gray';
+  }
+}
+
+/**
+ * Get activity icon
+ */
+function getActivityIcon(type) {
+  switch (type) {
+    case 'task_created': return 'plus';
+    case 'task_completed': return 'check';
+    case 'task_updated': return 'edit';
+    case 'comment_added': return 'comment';
+    case 'project_created': return 'folder-plus';
+    default: return 'info';
+  }
+}
+
+console.log('✅ Timeline and Analytics functions loaded');
+
+// =============================================================================
+// ANALYTICS FUNCTIONS
+// =============================================================================
+
+/**
+ * Export analytics data
+ */
+function exportAnalytics() {
+  const dateRange = $('analyticsDateRange')?.value || '30';
+  
+  google.script.run
+    .withSuccessHandler(function(csvData) {
+      // Create and download CSV file
+      const blob = new Blob([csvData], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `analytics-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      toast('Analytics data exported successfully', 'success');
+    })
+    .withFailureHandler(function(error) {
+      console.error('Export failed:', error);
+      toast('Failed to export analytics data', 'error');
+    })
+    .exportTasksToCSV();
+}
+
+/**
+ * Set chart type for analytics charts
+ */
+function setChartType(chartId, type) {
+  // Update button states
+  const buttons = document.querySelectorAll(`[onclick*="${chartId}"]`);
+  buttons.forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.onclick.toString().includes(`'${type}'`)) {
+      btn.classList.add('active');
+    }
+  });
+  
+  // Reload chart with new type
+  loadAnalyticsData();
+}
+
+/**
+ * Refresh project health data
+ */
+function refreshProjectHealth() {
+  const projectHealthList = $('projectHealthList');
+  if (projectHealthList) {
+    projectHealthList.innerHTML = '<div class="text-center text-gray-500 py-4">Loading...</div>';
+  }
+  loadAnalyticsData();
+}
+
+/**
+ * View all activity
+ */
+function viewAllActivity() {
+  // For now, just refresh the data
+  loadAnalyticsData();
+}
+
+/**
+ * Refresh top performers
+ */
+function refreshTopPerformers() {
+  const topPerformersList = $('topPerformersList');
+  if (topPerformersList) {
+    topPerformersList.innerHTML = '<div class="text-center text-gray-500 py-4">Loading...</div>';
+  }
+  loadAnalyticsData();
+}
+
+/**
+ * Refresh bottlenecks analysis
+ */
+function refreshBottlenecks() {
+  const bottlenecksList = $('bottlenecksList');
+  if (bottlenecksList) {
+    bottlenecksList.innerHTML = '<div class="text-center text-gray-500 py-4">Loading...</div>';
+  }
+  loadAnalyticsData();
+}
+
+/**
+ * Show analytics loading state
+ */
+function showAnalyticsLoading(show) {
+  const loadingEl = $('analyticsLoading');
+  const emptyEl = $('analyticsEmpty');
+  
+  if (show) {
+    if (loadingEl) loadingEl.classList.remove('hidden');
+    if (emptyEl) emptyEl.classList.add('hidden');
+  } else {
+    if (loadingEl) loadingEl.classList.add('hidden');
+  }
+}
+
+/**
+ * Update analytics metrics display
+ */
+function updateAnalyticsMetrics(metrics) {
+  if (!metrics) return;
+  
+  const elements = {
+    'analyticsStatTotal': metrics.total || 0,
+    'analyticsStatCompleted': metrics.completed || 0,
+    'analyticsStatInProgress': metrics.inProgress || 0,
+    'analyticsStatOverdue': metrics.overdue || 0
+  };
+  
+  Object.entries(elements).forEach(([id, value]) => {
+    const el = $(id);
+    if (el) el.textContent = value;
+  });
+}
+
+/**
+ * Update completion trend chart
+ */
+function updateCompletionChart(data) {
+  const canvas = $('completionTrendCanvas');
+  if (!canvas || !data) return;
+  
+  // Destroy existing chart if it exists
+  if (window.completionTrendChart) {
+    window.completionTrendChart.destroy();
+  }
+  
+  const ctx = canvas.getContext('2d');
+  window.completionTrendChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: data.map(item => item.date || item.day),
+      datasets: [{
+        label: 'Tasks Completed',
+        data: data.map(item => item.completed || 0),
+        borderColor: '#f59e0b',
+        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+        tension: 0.4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Update priority distribution chart
+ */
+function updatePriorityChart(data) {
+  const canvas = $('priorityDistributionCanvas');
+  if (!canvas || !data) return;
+  
+  // Destroy existing chart if it exists
+  if (window.priorityDistributionChart) {
+    window.priorityDistributionChart.destroy();
+  }
+  
+  const ctx = canvas.getContext('2d');
+  const colors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6'];
+  
+  window.priorityDistributionChart = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: data.map(item => item.priority),
+      datasets: [{
+        data: data.map(item => item.count),
+        backgroundColor: colors.slice(0, data.length),
+        borderWidth: 2,
+        borderColor: '#ffffff'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: 'bottom'
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Update team productivity display
+ */
+function updateTeamProductivity(teamData) {
+  const canvas = $('teamProductivityCanvas');
+  if (!canvas || !teamData) return;
+  
+  // Destroy existing chart if it exists
+  if (window.teamProductivityChart) {
+    window.teamProductivityChart.destroy();
+  }
+  
+  const ctx = canvas.getContext('2d');
+  window.teamProductivityChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: teamData.map(member => member.name || member.email.split('@')[0]),
+      datasets: [{
+        label: 'Productivity %',
+        data: teamData.map(member => member.productivity || 0),
+        backgroundColor: '#3b82f6',
+        borderColor: '#1d4ed8',
+        borderWidth: 1
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: {
+          beginAtZero: true,
+          max: 100
+        }
+      }
+    }
+  });
+}
+
+/**
+ * Update project health display
+ */
+function updateProjectHealth(healthData) {
+  const container = $('projectHealthList');
+  if (!container || !healthData) return;
+  
+  container.innerHTML = healthData.map(project => `
+    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+      <div class="flex-1">
+        <div class="font-medium text-gray-900">${escapeHtml(project.name)}</div>
+        <div class="text-sm text-gray-600">${project.totalTasks} tasks, ${project.tasksCompleted} completed</div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="text-sm font-medium">${project.progress}%</div>
+        <div class="w-3 h-3 rounded-full ${getHealthColor(project.health)}"></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+/**
+ * Update recent activity display
+ */
+function updateRecentActivity(activityData) {
+  const container = $('recentActivityList');
+  if (!container || !activityData) return;
+  
+  container.innerHTML = activityData.map(activity => `
+    <div class="flex items-start gap-3 p-3 hover:bg-gray-50 rounded-lg">
+      <div class="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center">
+        <i class="fas fa-${getActivityIcon(activity.type)} text-gray-600 text-sm"></i>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm text-gray-900">${escapeHtml(activity.description)}</div>
+        <div class="text-xs text-gray-500">${activity.user} • ${formatDateTime(activity.timestamp)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+/**
+ * Get health color for projects
+ */
+function getHealthColor(health) {
+  switch (health?.toLowerCase()) {
+    case 'excellent': return 'bg-green-500';
+    case 'good': return 'bg-green-400';
+    case 'at-risk': return 'bg-yellow-500';
+    case 'poor': return 'bg-red-500';
+    default: return 'bg-gray-400';
+  }
+}
+
+/**
+ * Get activity icon
+ */
+function getActivityIcon(type) {
+  switch (type) {
+    case 'task_created': return 'plus';
+    case 'task_updated': return 'edit';
+    case 'task_completed': return 'check';
+    case 'task_deleted': return 'trash';
+    case 'comment_added': return 'comment';
+    case 'project_created': return 'folder-plus';
+    default: return 'circle';
+  }
+}
+
+/**
+ * Set chart type for analytics charts
+ */
+function setChartType(chartId, type) {
+  // Update button states
+  const buttons = document.querySelectorAll(`[onclick*="${chartId}"]`);
+  buttons.forEach(btn => {
+    btn.classList.remove('active');
+    if (btn.onclick.toString().includes(`'${type}'`)) {
+      btn.classList.add('active');
+    }
+  });
+  
+  // Update chart based on type
+  switch (chartId) {
+    case 'completionTrend':
+      if (window.completionTrendChart) {
+        window.completionTrendChart.config.type = type;
+        window.completionTrendChart.update();
+      }
+      break;
+    case 'priorityDistribution':
+      if (window.priorityDistributionChart) {
+        window.priorityDistributionChart.config.type = type;
+        window.priorityDistributionChart.update();
+      }
+      break;
+    case 'teamProductivity':
+      if (window.teamProductivityChart) {
+        const newType = type === 'horizontal' ? 'bar' : type;
+        window.teamProductivityChart.config.type = newType;
+        if (type === 'horizontal') {
+          window.teamProductivityChart.options.indexAxis = 'y';
+        } else {
+          delete window.teamProductivityChart.options.indexAxis;
+        }
+        window.teamProductivityChart.update();
+      }
+      break;
+  }
+}
+
+/**
+ * Refresh project health data
+ */
+function refreshProjectHealth() {
+  const projectHealthList = $('projectHealthList');
+  if (projectHealthList) {
+    projectHealthList.innerHTML = '<div class="text-center text-gray-500 py-4">Loading...</div>';
+  }
+  loadAnalyticsData();
+}
+
+/**
+ * View all activity
+ */
+function viewAllActivity() {
+  // For now, just refresh the data
+  loadAnalyticsData();
+}
+
+/**
+ * Refresh top performers
+ */
+function refreshTopPerformers() {
+  const metric = $('performanceMetric')?.value || 'completed';
+  console.log('Refreshing top performers by:', metric);
+  loadAnalyticsData();
+}
+
+/**
+ * Refresh bottlenecks analysis
+ */
+function refreshBottlenecks() {
+  const bottlenecksList = $('bottlenecksList');
+  if (bottlenecksList) {
+    bottlenecksList.innerHTML = '<div class="text-center text-gray-500 py-4">Loading...</div>';
+  }
+  loadAnalyticsData();
+}
+
+/**
+ * Export analytics data
+ */
+function exportAnalytics() {
+  const dateRange = $('analyticsDateRange')?.value || '30';
+  
+  google.script.run
+    .withSuccessHandler(function(data) {
+      // Create and download CSV
+      const csv = convertToCSV(data);
+      downloadCSV(csv, `analytics-${dateRange}days-${new Date().toISOString().split('T')[0]}.csv`);
+      toast('Analytics data exported successfully', 'success');
+    })
+    .withFailureHandler(function(error) {
+      console.error('Export failed:', error);
+      toast('Failed to export analytics data', 'error');
+    })
+    .getAnalyticsData(parseInt(dateRange));
+}
+
+/**
+ * Convert analytics data to CSV format
+ */
+function convertToCSV(data) {
+  if (!data || !data.metrics) return '';
+  
+  const headers = ['Metric', 'Value'];
+  const rows = [
+    ['Total Tasks', data.metrics.total || 0],
+    ['Completed Tasks', data.metrics.completed || 0],
+    ['In Progress Tasks', data.metrics.inProgress || 0],
+    ['Overdue Tasks', data.metrics.overdue || 0],
+    ['Completion Rate', `${data.metrics.completionRate || 0}%`],
+    ['Average Task Time (days)', data.metrics.averageTaskTime || 0]
+  ];
+  
+  const csvContent = [headers, ...rows]
+    .map(row => row.map(field => `"${field}"`).join(','))
+    .join('\n');
+    
+  return csvContent;
+}
+
+/**
+ * Download CSV file
+ */
+function downloadCSV(csvContent, filename) {
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const link = document.createElement('a');
+  
+  if (link.download !== undefined) {
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+}
+
+/**
+ * Handle analytics error
+ */
+function handleAnalyticsError(error) {
+  console.error('Analytics error:', error);
+  showAnalyticsLoading(false);
+  
+  const emptyEl = $('analyticsEmpty');
+  if (emptyEl) emptyEl.classList.remove('hidden');
+  
+  toast('Failed to load analytics data', 'error');
+}
